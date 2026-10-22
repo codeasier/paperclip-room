@@ -180,7 +180,10 @@ section{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .view-tabs{display:flex;gap:3px;padding:3px;border-radius:9px;background:#f1f3f6;flex:none}
 .view-tab{border:0;background:transparent;border-radius:7px;padding:5px 12px;font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer}
 .view-tab[aria-selected="true"]{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 2px #242b3610}
-.view-note{min-width:0;font-size:11px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.view-note{flex:1;min-width:0;font-size:11px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.new-task{flex:none;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line-2);border-radius:8px;background:#fff;padding:5px 10px;font-size:11.5px;color:var(--ink-2);cursor:pointer}
+.new-task:hover{background:var(--rail);border-color:#d6dae1}
+.new-task:disabled{opacity:.4;cursor:default}
 .chat-pane,.task-pane{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0}
 .task-foot{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:#fff;font-size:11px;color:var(--ink-3);text-align:center}
 .chat-inner{max-width:820px;margin:0 auto;display:flex;flex-direction:column;gap:14px;padding:8px 0 18px}
@@ -202,6 +205,25 @@ section{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .chat-typing .dot{width:6px;height:6px;border-radius:50%;background:var(--run);animation:chatpulse 1.2s ease-in-out infinite}
 @keyframes chatpulse{0%,100%{opacity:.35}50%{opacity:1}}
 .chat-note{text-align:center;font-size:10.5px;color:var(--ink-3);padding:2px 0}
+.modal-backdrop{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:16px;background:#1f232866}
+.modal{width:min(520px,100%);max-height:calc(100dvh - 32px);overflow:auto;background:#fff;border-radius:14px;box-shadow:0 24px 60px #1f232833;padding:18px}
+.modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.modal-head h3{margin:0;font-size:15px;font-weight:650}
+.modal-close{width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--line-2);border-radius:8px;background:#fff;cursor:pointer;font-size:20px;line-height:1}
+.modal-close:hover{background:var(--rail)}
+.field{display:flex;flex-direction:column;gap:5px;margin:12px 0;font-size:11.5px;color:var(--ink-2)}
+.field input,.field textarea,.field select{border:1px solid var(--line-2);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;color:var(--ink);background:#fff;outline:none}
+.field input:focus,.field textarea:focus,.field select:focus{border-color:#dfac8f;box-shadow:0 0 0 3px #c6521309}
+.field textarea{resize:vertical;min-height:110px;line-height:1.6}
+.field-row{display:flex;gap:12px}
+.field-row .field{flex:1;min-width:0}
+.field strong{font-size:13px;color:var(--ink);font-weight:600;padding:8px 0}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.btn-ghost{border:1px solid var(--line-2);background:#fff;border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer}
+.btn-primary{border:0;background:var(--accent);color:#fff;border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer}
+.btn-primary:hover{background:#ad440f}
+.btn-primary:disabled{opacity:.4;cursor:default}
+.modal-note{font-size:10.5px;color:var(--ink-3);margin-top:-4px}
 .stream-wrap{position:relative;display:flex;flex:1;min-height:0}
 .stream-notice{padding:7px 20px;background:#fff8ed;color:#965312;font-size:12px;text-align:center}
 .text-button{background:none;border:0;cursor:pointer;color:inherit;text-decoration:underline;text-underline-offset:3px;padding:5px 8px}
@@ -449,7 +471,7 @@ select.model{
 .toast{
   position:fixed;left:50%;bottom:110px;transform:translate(-50%,8px);
   background:#1f2328;color:#fff;padding:9px 16px;border-radius:10px;font-size:12px;
-  opacity:0;transition:opacity .18s,transform .18s;pointer-events:none;z-index:20;
+  opacity:0;transition:opacity .18s,transform .18s;pointer-events:none;z-index:40;
   max-width:80vw;box-shadow:0 10px 28px rgba(16,24,40,.18);
 }
 .toast.show{opacity:1;transform:translate(-50%,0)}
@@ -572,6 +594,7 @@ select.model{
         <button type="button" class="view-tab" id="view-tasks" role="tab" aria-selected="false" aria-controls="taskpane" tabindex="-1">任务</button>
       </div>
       <span class="view-note" id="viewnote">直接对话，不进入任务列表</span>
+      <button type="button" class="new-task" id="newtask" disabled>＋ 新建任务</button>
     </div>
     <div class="chat-pane" id="chatpane" role="tabpanel" aria-labelledby="view-chat">
       <div class="stream-notice" id="chatnotice" role="status" hidden><span id="chaterror"></span><button class="text-button" id="chatretry">重试</button></div>
@@ -612,7 +635,7 @@ select.model{
         </div>
         <button class="latest" id="latest" hidden>↓ 回到最新消息</button>
       </div>
-      <div class="task-foot"><span>任务时间线只读；需要补充信息请使用对话。</span><button type="button" class="text-button" id="gotochat">去对话</button></div>
+      <div class="task-foot"><span>任务时间线只读；可从顶部新建任务。</span><button type="button" class="text-button" id="gotochat">去对话</button></div>
     </div>
     </div>
     <div class="message-panel" id="sidepanel" role="region" aria-label="任务进展与消息详情" hidden>
@@ -636,6 +659,30 @@ select.model{
 </main>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<div class="modal-backdrop" id="taskmodal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="taskmodaltitle">
+    <div class="modal-head">
+      <h3 id="taskmodaltitle">新建任务</h3>
+      <button type="button" class="modal-close" id="taskclose" aria-label="关闭新建任务">×</button>
+    </div>
+    <form id="taskform">
+      <label class="field"><span>标题</span><input id="tasktitle" maxlength="200" placeholder="一句话说明要做什么" required></label>
+      <label class="field"><span>描述</span><textarea id="taskdesc" rows="5" placeholder="背景、范围、验收标准…"></textarea></label>
+      <div class="field-row">
+        <label class="field"><span>优先级</span><select id="taskpriority">
+          <option value="low">低</option><option value="medium" selected>中</option><option value="high">高</option><option value="critical">紧急</option>
+        </select></label>
+        <div class="field"><span>指派给</span><strong id="taskassignee">—</strong></div>
+      </div>
+      <div class="modal-note">创建后会进入该成员的任务列表并唤醒成员；不会自动创建对话消息。</div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" id="taskcancel">取消</button>
+        <button type="submit" class="btn-primary" id="tasksubmit">创建任务</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -662,7 +709,7 @@ let tasks = [], tasksLoaded = false, tasksRequest = null, tasksSequence = 0, tas
 let tasksMeta = {groups:{open:0}, note:""}, tasksAt = 0;
 let chatMessages = [], chatInfo = null, chatState = "loading", chatRequest = null;
 let chatSequence = 0, chatSignature = null, chatEnabled = false, chatReplying = false, chatAt = 0;
-let view = "chat";
+let view = "chat", taskSubmitting = false, taskReturnFocus = null;
 let panelOpen = false, panelTab = "tasks", panelInit = false;
 const taskOpen = new Set();
 let roomEvents = [], executionRuns = [], executionRequest = null, executionSequence = 0, executionLoaded = false;
@@ -872,6 +919,7 @@ function renderEmptyTeam(){
   updateTaskBadge();
 }
 function resetTeamView(){
+  closeTaskModal();
   stateEpoch++; stateBusy = false;
   roomRequest?.controller.abort(); roomRequest = null; roomSequence++;
   executionRequest?.controller.abort(); executionRequest = null; executionSequence++;
@@ -1159,6 +1207,64 @@ $("#chatretry").onclick = () => loadChat(true);
 $("#chatstream").addEventListener("scroll", updateChatLatest, {passive:true});
 $("#chatlatest").onclick = () => { $("#chatstream").scrollTop = $("#chatstream").scrollHeight; updateChatLatest(); };
 
+/* ---------- 显式新建任务 ---------- */
+function openTaskModal(){
+  if(!selected) return;
+  taskReturnFocus = document.activeElement;
+  $("#taskassignee").textContent = names[selected] || "成员";
+  $("#tasktitle").value = "";
+  $("#taskdesc").value = "";
+  $("#taskpriority").value = "medium";
+  $("#taskmodal").hidden = false;
+  $("#tasksubmit").disabled = false;
+  $("#tasksubmit").textContent = "创建任务";
+  setTimeout(() => $("#tasktitle").focus(), 0);
+}
+function closeTaskModal(){
+  if($("#taskmodal").hidden) return;
+  $("#taskmodal").hidden = true;
+  if(taskReturnFocus && document.contains(taskReturnFocus)) taskReturnFocus.focus({preventScroll:true});
+  taskReturnFocus = null;
+}
+$("#newtask").onclick = openTaskModal;
+$("#taskclose").onclick = closeTaskModal;
+$("#taskcancel").onclick = closeTaskModal;
+$("#taskmodal").addEventListener("click", e => { if(e.target === $("#taskmodal")) closeTaskModal(); });
+$("#taskform").onsubmit = async e => {
+  e.preventDefault();
+  if(!selected || taskSubmitting) return;
+  const id = selected, title = $("#tasktitle").value.trim();
+  if(!title){ $("#tasktitle").focus(); return; }
+  taskSubmitting = true;
+  $("#tasksubmit").disabled = true;
+  $("#tasksubmit").textContent = "创建中…";
+  try{
+    const d = await requestJSON("/api/tasks", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        agentId: id,
+        title,
+        description: $("#taskdesc").value.trim(),
+        priority: $("#taskpriority").value,
+      })
+    });
+    if(!d.ok) throw new Error(d.error || "创建失败");
+    closeTaskModal();
+    toast(`已创建 ${d.issue || "任务"}，指派给 ${names[id]}`);
+    setView("tasks");
+    refreshState();
+    loadTasks(true);
+    loadRoom(true);
+    loadExecution(true);
+  }catch(err){
+    toast("创建任务失败：" + err.message);
+  }finally{
+    taskSubmitting = false;
+    $("#tasksubmit").disabled = false;
+    $("#tasksubmit").textContent = "创建任务";
+  }
+};
+
 /* ---------- 右栏：任务进展 ---------- */
 const TASK_PRIORITY = {critical:["P0","critical"], high:["P1","high"], medium:["P2","medium"], low:["P3","low"]};
 
@@ -1342,7 +1448,7 @@ function renderTasks(){
   Array.from(box.querySelectorAll("details[open]")).forEach(el => taskOpen.add(el.dataset.task));
   tasksSignature = signature;
   if(!tasks.length){
-    box.innerHTML = '<div class="empty"><div class="big">✓</div><strong>暂无关联任务</strong><span>对话不会自动建单；成员创建的任务会显示在这里。</span></div>';
+    box.innerHTML = '<div class="empty"><div class="big">✓</div><strong>暂无关联任务</strong><span>对话不会自动建单；新建或成员创建的任务会显示在这里。</span></div>';
     pane.scrollTop = scroll;
     return;
   }
@@ -1412,6 +1518,7 @@ $("#model").onchange = async () => {
 /* ---------- 选中 ---------- */
 function selectAgent(id){
   if(id === selected) return;
+  closeTaskModal();
   closeDetail(false);
   messageEvents.clear();
   if(selected) drafts.set(selected, $("#input").value);
@@ -1621,6 +1728,7 @@ function closeDetail(restoreFocus = true){
 }
 document.addEventListener("keydown",e=>{
   if(e.key !== "Escape") return;
+  if(!$("#taskmodal").hidden){e.preventDefault();closeTaskModal();return;}
   if(activeMessage){e.preventDefault();closeDetail();}
   else if(panelOpen && panelTab === "tasks" && $("#sidepanel").contains(document.activeElement)){e.preventDefault();closePanel();}
 });
@@ -1736,6 +1844,7 @@ function updateComposer(){
   const ready = !!selected && chatEnabled && !pending;
   input.disabled = !ready;
   $("#send").disabled = !ready || !input.value.trim();
+  $("#newtask").disabled = !selected;
   $("#send").setAttribute("aria-label", pending ? "正在发送" : `发送给 ${names[selected] || "成员"}`);
   $("#send .send-label").textContent = pending ? "发送中" : "发送";
   $("#draftlabel").textContent = pending ? "正在发送…" : input.value ? "草稿 · 切换成员会保留" : "";

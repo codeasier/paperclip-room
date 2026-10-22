@@ -40,6 +40,7 @@ OPEN_STATES = ("in_progress", "in_review", "todo", "blocked")
 TASK_ORDER = {"in_progress": 0, "blocked": 1, "in_review": 2, "todo": 3, "backlog": 4}
 TASK_RECENT_DONE = 4
 TASK_PARTICIPATION_WINDOW = 12
+TASK_PRIORITIES = ("low", "medium", "high", "critical")
 CHECKBOX_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[([ xX])\][ \t]+(.+?)[ \t]*$", re.M)
 
 
@@ -767,6 +768,38 @@ def execution_timeline(agent_id, company=None):
     return {"agentId": agent_id, "state": "available", "runs": [execution_run(run, company=company) for run in runs[:4]], "note": "展示当前成员最近 4 次任务运行，按原始会话顺序展示公开输出。"}
 
 
+def invalidate_task_caches():
+    """新建/评论后让任务与状态缓存立即失效，避免面板要等 4 秒才出现。"""
+    for key in list(_CACHE):
+        if key.startswith(("issues:", "tasks:", "agents:")):
+            _CACHE.pop(key, None)
+
+
+def create_task(company, agent_id, title, description="", priority="medium"):
+    company = company or COMPANY
+    if not any(agent.get("id") == agent_id for agent in agents_for(company)):
+        return {"ok": False, "error": "成员不存在。"}
+    lines = (title or "").strip().splitlines()
+    clean_title = lines[0].strip()[:200] if lines else ""
+    if not clean_title:
+        return {"ok": False, "error": "任务标题不能为空。"}
+    payload = {
+        "title": clean_title,
+        "description": (description or "").strip()[:20000],
+        "assigneeAgentId": agent_id,
+        "status": "todo",
+    }
+    if priority in TASK_PRIORITIES:
+        payload["priority"] = priority
+    st, data = call("POST", f"/api/companies/{company}/issues", payload)
+    if st in (200, 201) and isinstance(data, dict):
+        invalidate_task_caches()
+        return {"ok": True, "id": data.get("id"), "issue": data.get("identifier"),
+                "status": data.get("status"), "priority": data.get("priority")}
+    return {"ok": False,
+            "error": f"建单失败 HTTP {st}: {json.dumps(data, ensure_ascii=False)[:200]}"}
+
+
 def send_message(agent_id, text, company=None):
     """有在办任务就追加评论（会唤醒 agent），否则新建任务派给它。"""
     company = company or COMPANY
@@ -791,6 +824,7 @@ def send_message(agent_id, text, company=None):
         "status": "todo",
     })
     if st in (200, 201):
+        invalidate_task_caches()
         return {"ok": True, "mode": "new-issue",
                 "issue": (data or {}).get("identifier")}
     return {"ok": False, "error": f"建单失败 HTTP {st}: {json.dumps(data, ensure_ascii=False)[:200]}"}
@@ -1035,6 +1069,19 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         query = parse_qs(u.query)
         body = self._json_body()
+
+        if u.path == "/api/tasks":
+            company = self._company(query, body)
+            if not company:
+                return self._send(404, {"error": "team not found"})
+            aid, title = body.get("agentId"), (body.get("title") or "").strip()
+            if not aid or not title:
+                return self._send(400, {"error": "agentId and title required"})
+            return self._send(200, create_task(
+                company, aid, title,
+                description=body.get("description") or "",
+                priority=(body.get("priority") or "medium"),
+            ))
 
         if u.path == "/api/chat":
             company = self._company(query, body)

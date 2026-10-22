@@ -172,6 +172,34 @@ class TaskProgressTests(unittest.TestCase):
         self.assertEqual(data["scope"]["participationWindow"], 12)
         self.assertIn("最近 4 项", data["note"])
 
+    def test_create_task_posts_to_company_and_clears_caches(self):
+        server._CACHE["issues:c1"] = (0, [])
+        saved = {"id": "i9", "identifier": "HER-9", "status": "todo", "priority": "high"}
+        with patch.object(server, "fetch_agents", return_value=[{"id": "pl", "name": "PL"}]), \
+             patch.object(server, "call", return_value=(201, saved)) as api:
+            result = server.create_task("c1", "pl", "实现登录\n补充说明", "完整描述", "high")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["issue"], "HER-9")
+        self.assertNotIn("issues:c1", server._CACHE)
+        method, path, payload = api.call_args.args
+        self.assertEqual((method, path), ("POST", "/api/companies/c1/issues"))
+        self.assertEqual(payload["title"], "实现登录")
+        self.assertEqual(payload["description"], "完整描述")
+        self.assertEqual(payload["assigneeAgentId"], "pl")
+        self.assertEqual(payload["status"], "todo")
+        self.assertEqual(payload["priority"], "high")
+
+    def test_create_task_validates_agent_title_and_priority(self):
+        with patch.object(server, "fetch_agents", return_value=[]):
+            self.assertFalse(server.create_task("c1", "missing", "标题")["ok"])
+        server._CACHE.clear()
+        with patch.object(server, "fetch_agents", return_value=[{"id": "pl"}]), \
+             patch.object(server, "call", return_value=(201, {"identifier": "HER-1"})) as api:
+            self.assertFalse(server.create_task("c1", "pl", "   ")["ok"])
+            server.create_task("c1", "pl", "标题", priority="urgent")
+        payload = api.call_args.args[2]
+        self.assertNotIn("priority", payload)
+
     def test_no_checklist_and_no_runs_stay_empty(self):
         data = self.load([issue("i1", "HER-1", "todo")])
         task = data["tasks"][0]

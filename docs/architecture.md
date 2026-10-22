@@ -27,6 +27,7 @@ Python ThreadingHTTPServer (server.py)
 | GET | `/api/chat?company=<id>&agent=<id>` | 当前 board 用户与该成员的 Agent Chat 会话与消息 |
 | POST | `/api/chat?company=<id>` | JSON `{ "agentId": "…", "text": "…" }`；发送 Agent Chat 消息，必要时自动创建会话 |
 | GET | `/api/tasks?company=<id>&agent=<id>` | 成员名下未结/最近完成任务，以及最近参与或被点名的其他任务；含检查项、运行与讨论摘要 |
+| POST | `/api/tasks?company=<id>` | JSON `{ "agentId": "…", "title": "…", "description": "…", "priority": "…" }`；显式新建任务并指派 |
 | GET | `/api/room?company=<id>&agent=<id>` | 成员相关任务、评论与精确运行回执 |
 | GET | `/api/execution?company=<id>&agent=<id>` | 当前成员最近4次运行及最新过程页 |
 | GET | `/api/run?company=<id>&agent=<id>&run=<uuid>&before=<cursor>` | 指定运行的更早过程页；校验团队与成员归属 |
@@ -49,6 +50,7 @@ Agent Chat 需要实例 Experimental 设置中的 `enableAgentChat` 已开启，
 - 首次发送时 `POST` 同一路径创建会话；Paperclip 用 `(companyId, conversationAgentId, conversationUserId)` 唯一确定一条会话。
 - 会话本质是被 Paperclip 从普通任务列表隐藏的 issue；消息是 issue comments，发送时必须带 `clientRequestId`。
 - 本控制台的 `POST /api/chat` 会先确保会话存在，再发送评论；不调用原来“追加评论或新建任务”的 `/api/send`。
+- 显式建单走 `POST /api/tasks`：创建 issue（`status=todo`，可带 `priority`），写入后清空任务/状态缓存，并让成员领取。
 - 会话回复按评论轮询读取；没有 SSE/WebSocket。
 - 会话属于后端 token 的 board 用户（当前 `local-board`），不同 board 用户看到不同会话。
 - Agent Chat 关闭时接口返回明确状态，界面禁用输入，不会退回任务模式。
@@ -89,7 +91,8 @@ Agent Chat 需要实例 Experimental 设置中的 `enableAgentChat` 已开启，
 - 成员草稿保存在当前页面的Map中，不写localStorage，刷新丢失；切换团队时清空。
 - 团队选择写入 `localStorage`（`room.team`），只影响浏览器视图，不修改 Paperclip。
 - 切成员时取消旧请求并校验请求序列，避免延迟响应覆盖当前成员。
-- 中央默认「对话」，任务时间线在「任务」标签只读展示；对话每4秒轮询，切回对话时若超过3秒会强制刷新。
+- 中央默认「对话」，任务时间线在「任务」标签只读展示；视图栏的「新建任务」是唯一的显式建单入口。
+- 对话每4秒轮询，切回对话时若超过3秒会强制刷新；新建任务成功后切换到任务标签并刷新任务进展/时间线。
 - 右侧栏在任务进展与消息详情之间切换；展开的任务卡按任务ID保留，任务进展每8秒刷新且只在任务标签可见时轮询。
 - 评论用稳定ID保持侧栏选择，工具按运行ID/消息ID保持展开状态；更新时尽量保留滚动锚点。
 - 展开的通信详情占用真实flex布局空间；760px及以下切换至全宽详情，关闭返回任务时间线。
