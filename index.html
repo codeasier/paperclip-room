@@ -387,7 +387,13 @@ section{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .task-top::after{content:'›';font-size:17px;line-height:16px;color:var(--ink-3)}
 .task-card[open] .task-top::after{transform:rotate(90deg)}
 .task-duration{font-variant-numeric:tabular-nums;color:var(--ink-2)}
-.message-panel.trace-wide{width:clamp(340px,55%,780px)}
+.task-pane>.task-controls{padding:10px 24px;flex:none}
+.task-pane>.task-controls .view-tabs{margin-right:0}
+.task-pane>.task-controls .task-search{width:220px;flex:1;max-width:420px;margin-left:auto}
+#taskspane .task-list{padding:20px 24px}
+.issue-sep[role="button"]{cursor:pointer}
+.issue-sep[role="button"]:hover{background:var(--accent-weak)}
+.execution-inspect{border:1px solid var(--line-2);border-radius:6px;padding:3px 7px;background:white;font-size:11px;cursor:pointer;flex:none}
 .trace-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:11px;color:var(--ink-3)}
 .trace-tools button{padding:4px 8px;border:1px solid var(--line-2);border-radius:6px;background:white;cursor:pointer;font-size:11px}
 .trace-window{font-size:10.5px;color:var(--ink-2);line-height:1.6;margin:0 0 8px}
@@ -414,7 +420,7 @@ button.trace-label:hover{background:var(--accent-weak)}
 .trace-selected{margin-top:12px}
 .trace-selected .task-detail{border:1px solid var(--line);border-radius:8px}
 .trace-selected h4{font-size:12px;margin:8px 0}
-@media(max-width:760px){.message-panel.trace-wide{width:100%}.trace-axis,.trace-row{grid-template-columns:120px minmax(0,1fr)}}
+@media(max-width:760px){.trace-axis,.trace-row{grid-template-columns:120px minmax(0,1fr)}.task-pane>.task-controls{padding:8px 12px}.task-pane>.task-controls .task-search{width:100%;max-width:none;flex-basis:100%}#taskspane .task-list{padding:12px}}
 
 .empty{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -631,8 +637,8 @@ select.model{
         <h2 id="title">团队工作室</h2>
         <div class="meta" id="roommeta"></div>
       </div>
-      <button class="panel-toggle" id="paneltoggle" type="button" aria-expanded="false" aria-controls="sidepanel" aria-label="打开任务进展">
-        <span class="pt-full">任务进展</span><span class="pt-short">任务</span><span class="n" id="panelcount" hidden></span>
+      <button class="panel-toggle" id="paneltoggle" type="button" aria-expanded="false" aria-controls="sidepanel" aria-label="打开详情">
+        <span>详情</span>
       </button>
       <span class="room-status" id="roomstatus">等待连接</span>
     </div>
@@ -680,37 +686,34 @@ select.model{
       </div>
     </div>
     <div class="task-pane" id="taskpane" role="tabpanel" aria-labelledby="view-tasks" hidden>
+      <div class="task-controls">
+        <div class="view-tabs" role="group" aria-label="任务呈现方式">
+          <button type="button" class="view-tab" id="tasks-list-view" aria-pressed="true">列表</button>
+          <button type="button" class="view-tab" id="tasks-trace-view" aria-pressed="false">时间线</button>
+        </div>
+        <select class="task-filter" id="tasks-filter" aria-label="筛选任务状态"><option value="all">全部状态</option><option value="active">执行中</option><option value="blocked">受阻</option><option value="open">未完成</option><option value="done">已结束</option></select>
+        <input type="search" class="task-search" id="tasks-search" placeholder="搜索任务编号或标题…" aria-label="搜索任务编号或标题">
+      </div>
       <div class="stream-notice" id="executionnotice" role="status" hidden></div>
-      <div class="stream-wrap">
+      <div class="task-notice" id="tasknotice" role="status" hidden></div>
+      <div class="stream-wrap" id="taskrecords">
         <div class="stream" id="stream" tabindex="0" aria-label="成员任务与消息记录" aria-busy="true">
           <div class="stream-inner"><div class="empty"><div class="big">·</div><strong>正在连接工作室</strong><span>获取团队状态与最近消息…</span></div></div>
         </div>
         <button class="latest" id="latest" hidden>↓ 回到最新消息</button>
       </div>
+      <div class="panel-content" id="taskspane" aria-label="当前成员任务时间线" tabindex="0" hidden>
+        <div class="task-list" id="tasklist"><div class="task-skeleton">正在读取任务时间线…</div></div>
+      </div>
       <div class="task-foot"><span>任务时间线只读；可从顶部新建任务。</span><button type="button" class="text-button" id="gotochat">去对话</button></div>
     </div>
     </div>
-    <div class="message-panel" id="sidepanel" role="region" aria-label="任务进展与消息详情" hidden>
+    <div class="message-panel" id="sidepanel" role="region" aria-label="详情" hidden>
       <div class="panel-head">
-        <div class="panel-tabs" role="tablist" aria-label="侧栏内容">
-          <button type="button" class="panel-tab" id="tab-tasks" role="tab" aria-selected="true" aria-controls="taskspane">任务进展</button>
-          <button type="button" class="panel-tab" id="tab-message" role="tab" aria-selected="false" aria-controls="detailpane" tabindex="-1" disabled>消息详情</button>
-        </div>
+        <h3>详情</h3>
         <button type="button" class="panel-close" id="closepanel" aria-label="关闭侧栏">×</button>
       </div>
-      <div class="panel-content" id="taskspane" role="tabpanel" aria-labelledby="tab-tasks" tabindex="0">
-        <div class="task-controls">
-          <div class="view-tabs" role="group" aria-label="任务呈现方式">
-            <button type="button" class="view-tab" id="tasks-list-view" aria-pressed="true">列表</button>
-            <button type="button" class="view-tab" id="tasks-trace-view" aria-pressed="false">时间线</button>
-          </div>
-          <select class="task-filter" id="tasks-filter" aria-label="筛选任务状态"><option value="all">全部状态</option><option value="active">执行中</option><option value="blocked">受阻</option><option value="open">未完成</option><option value="done">已结束</option></select>
-          <input type="search" class="task-search" id="tasks-search" placeholder="搜索任务编号或标题…" aria-label="搜索任务编号或标题">
-        </div>
-        <div class="task-notice" id="tasknotice" role="status" hidden></div>
-        <div class="task-list" id="tasklist"><div class="task-skeleton">正在读取任务进展…</div></div>
-      </div>
-      <div class="panel-content" id="detailpane" role="tabpanel" aria-labelledby="tab-message" tabindex="-1" hidden>
+      <div class="panel-content" id="detailpane" tabindex="-1">
         <div id="detailcontent"></div>
       </div>
     </div>
@@ -768,11 +771,11 @@ let activeMessage = null, messageEvents = new Map(), detailSignature = null;
 let tasks = [], tasksLoaded = false, tasksRequest = null, tasksSequence = 0, tasksSignature = null;
 let tasksMeta = {groups:{open:0}, note:""}, tasksAt = 0;
 let taskLayout = "list", traceZoom = 1, traceSelected = null, traceRange = '1h', traceOffset = 0;
+let taskListScroll = 0;
 let chatMessages = [], chatInfo = null, chatState = "loading", chatRequest = null;
 let chatSequence = 0, chatSignature = null, chatEnabled = false, chatReplying = false, chatAt = 0;
 let view = "chat", taskSubmitting = false, taskReturnFocus = null;
-let panelOpen = false, panelTab = "tasks", panelInit = false;
-const taskOpen = new Set();
+let panelOpen = false, detailTarget = null, detailReturnFocus = null;
 let roomEvents = [], executionRuns = [], executionRequest = null, executionSequence = 0, executionLoaded = false;
 const toolExpanded = new Set(), moreLoading = new Set();
 let stateBusy = false, stateEpoch = 0, roomRequest = null, roomSequence = 0;
@@ -996,7 +999,7 @@ function resetTeamView(){
   tasksRequest?.controller.abort(); tasksRequest = null; tasksSequence++;
   chatRequest?.controller.abort(); chatRequest = null; chatSequence++;
   activeMessage = null; detailSignature = null; messageEvents.clear();
-  if(panelTab === "message"){ panelTab = "tasks"; renderPanelTabs(); }
+  closePanel(false);
   syncActiveMessage();
   selected = null; agents = []; names = {}; drafts.clear();
   roomEvents = []; executionRuns = []; executionLoaded = false;
@@ -1004,8 +1007,9 @@ function resetTeamView(){
   tasks = []; tasksLoaded = false; tasksSignature = null; tasksAt = 0;
   chatMessages = []; chatInfo = null; chatState = "loading"; chatSignature = null;
   chatEnabled = false; chatReplying = false; chatAt = 0;
-  tasksMeta = {groups:{open:0}, note:""}; taskOpen.clear();
+  tasksMeta = {groups:{open:0}, note:""};
   traceSelected = null; traceZoom = 1; traceOffset = 0;
+  taskListScroll=0;
   $('#tasks-search').value = ''; $('#tasks-filter').value = 'all';
   $("#executionnotice").hidden = true;
   $("#roomnotice").hidden = true;
@@ -1073,10 +1077,6 @@ async function refreshState(){
     else { renderRail(); renderHead(); renderModel(); }
     updateBrand();
     if(view === "chat") renderChat();
-    if(!panelInit){
-      panelInit = true;
-      if(window.matchMedia("(min-width: 961px)").matches) openPanel("tasks");
-    }
   }catch(e){
     if(epoch !== stateEpoch) return;
     $("#live").classList.add("offline");
@@ -1166,13 +1166,15 @@ function setView(next){
   $("#view-tasks").tabIndex = chat ? -1 : 0;
   $("#viewnote").textContent = chat ? "直接对话，不进入任务列表" : "任务与运行记录（只读）";
   if(chat){
-    if(activeMessage) closeDetail(false);
+    if(panelOpen) closePanel(false);
     if(chatState === "unavailable" || (chatAt && Date.now() - chatAt > 3000)) loadChat(true);
     updateChatLatest();
     updateComposer();
   } else {
     if(roomSignature === null) loadRoom();
     if(!executionLoaded) loadExecution();
+    if(!tasksLoaded || Date.now()-tasksAt>15000) loadTasks();
+    setTaskLayout(taskLayout);
     updateLatest();
   }
 }
@@ -1337,7 +1339,7 @@ $("#taskform").onsubmit = async e => {
   }
 };
 
-/* ---------- 右栏：任务进展 ---------- */
+/* ---------- 中央任务视图与统一详情 ---------- */
 const TASK_PRIORITY = {critical:["P0","critical"], high:["P1","high"], medium:["P2","medium"], low:["P3","low"]};
 
 function ageFrom(iso){
@@ -1346,64 +1348,38 @@ function ageFrom(iso){
   if(isNaN(t)) return null;
   return Math.max(0, Math.round((Date.now() - t) / 60000));
 }
-function taskOpenCount(){
-  if(tasksLoaded) return tasks.filter(t => !["done","cancelled"].includes(t.status)).length;
-  return agents.find(a => a.id === selected)?.openCount || 0;
-}
 function updateTaskBadge(){
-  const n = taskOpenCount(), badge = $("#panelcount");
-  badge.textContent = n > 0 ? String(n) : "";
-  badge.hidden = n <= 0;
-  $("#paneltoggle").setAttribute("aria-label", `${panelOpen ? "关闭" : "打开"}任务进展${n > 0 ? `，${n} 个未结相关任务` : ""}`);
+  $("#paneltoggle").setAttribute("aria-label", `${panelOpen ? "关闭" : "打开"}详情`);
 }
 
-function renderPanelTabs(){
-  const hasMessage = !!(activeMessage && messageEvents.has(activeMessage));
-  const tasksTab = $("#tab-tasks"), msgTab = $("#tab-message");
-  tasksTab.setAttribute("aria-selected", String(panelTab === "tasks"));
-  tasksTab.tabIndex = panelTab === "tasks" ? 0 : -1;
-  msgTab.setAttribute("aria-selected", String(panelTab === "message"));
-  msgTab.tabIndex = panelTab === "message" ? 0 : -1;
-  msgTab.disabled = !hasMessage;
-  $("#taskspane").hidden = panelTab !== "tasks";
-  $("#detailpane").hidden = panelTab !== "message";
-}
-function openPanel(tab = "tasks"){
-  const wasOpen = panelOpen;
-  if(tab === "message" && !(activeMessage && messageEvents.has(activeMessage))) tab = "tasks";
+function openPanel(){
   panelOpen = true;
-  panelTab = tab;
   $("#sidepanel").hidden = false;
   $("#roombody").classList.add("detail-open");
   $("#paneltoggle").setAttribute("aria-expanded", "true");
-  renderPanelTabs();
   updateTaskBadge();
-  if(tab === "message") renderDetail();
-  else if(!tasksLoaded || Date.now() - tasksAt > 15000) loadTasks(true);
-  if(!wasOpen) updateLatest();
+  renderDetail();
+  if(taskLayout === 'trace'){tasksSignature=null;renderTasks();}
+  updateLatest();
 }
 function closePanel(restoreFocus = true){
   if(!panelOpen) return;
+  const returnData=detailReturnFocus ? {...detailReturnFocus.dataset} : {};
   preserveStreamLayout(()=>{
     panelOpen = false;
     activeMessage = null;
+    detailTarget = null; traceSelected = null;
     detailSignature = null;
     $("#sidepanel").hidden = true;
     $("#roombody").classList.remove("detail-open");
     $("#paneltoggle").setAttribute("aria-expanded", "false");
-    renderPanelTabs();
   });
   syncActiveMessage();
   updateTaskBadge();
-  if(restoreFocus) $("#paneltoggle").focus({preventScroll:true});
-}
-function setTab(tab){
-  if(tab === "message" && !(activeMessage && messageEvents.has(activeMessage))) return;
-  if(!panelOpen){ openPanel(tab); return; }
-  panelTab = tab;
-  renderPanelTabs();
-  if(tab === "message") renderDetail();
-  else if(!tasksLoaded || Date.now() - tasksAt > 15000) loadTasks(true);
+  if(taskLayout === 'trace'){tasksSignature=null;renderTasks();}
+  const replacedTrigger=returnData.traceRun ? Array.from($('#tasklist').querySelectorAll('[data-trace-run]')).find(el=>el.dataset.traceRun===returnData.traceRun) : returnData.traceTask ? Array.from($('#tasklist').querySelectorAll('[data-trace-task]')).find(el=>el.dataset.traceTask===returnData.traceTask) : null;
+  if(restoreFocus) (detailReturnFocus?.isConnected ? detailReturnFocus : replacedTrigger || $("#paneltoggle")).focus({preventScroll:true});
+  detailReturnFocus=null;
 }
 
 async function loadTasks(force = false){
@@ -1427,6 +1403,8 @@ async function loadTasks(force = false){
     tasksLoaded = true; tasksAt = Date.now();
     $("#tasknotice").hidden = true;
     renderTasks();
+    if(view === 'tasks' && taskLayout === 'list') renderTimeline();
+    if(panelOpen) renderDetail();
     updateTaskBadge();
   }catch(e){
     if(id !== selected || sequence !== tasksSequence) return;
@@ -1442,22 +1420,11 @@ async function loadTasks(force = false){
   }
 }
 
-function taskTrack(t){
-  const labels = ["待办","进行中","待评审","完成"];
-  if(t.phase == null){
-    const filled = t.status === "blocked" ? '<i class="on"></i>' : "";
-    return `<div class="task-track ${esc(t.status)}" role="img" aria-label="${esc(STATUS[t.status] || t.status)}">${filled}</div>`;
-  }
-  const cells = [0,1,2,3].map(i => {
-    const on = i < t.phase || (t.status === "done" && i === 3);
-    const now = i === t.phase && t.status !== "done";
-    return `<i class="${on ? "on" : now ? "now" : ""}"></i>`;
-  }).join("");
-  return `<div class="task-track ${t.status === "done" ? "done" : ""}" role="img" aria-label="${esc(`进展：${labels[t.phase]}（${t.phase + 1}/4）`)}">${cells}</div>`;
-}
-
 function taskDetailHTML(t){
   const facts = [];
+  if(TASK_PRIORITY[t.priority]) facts.push(`优先级 ${TASK_PRIORITY[t.priority][0]}`);
+  const elapsed=taskIntervals([t]).filter(r=>r.measured).reduce((sum,r)=>sum+r.end-r.start,0);
+  if(elapsed) facts.push(`窗口内累计执行 ${durationLabel(elapsed)}（并行运行分别计时）`);
   if(t.relation === "authored") facts.push("你在该任务中发过言");
   if(t.relation === "addressed") facts.push("该任务的消息点名了你");
   if(t.parent) facts.push(`父任务 ${t.parent.identifier || ""}`);
@@ -1484,41 +1451,12 @@ function taskDetailHTML(t){
   return html + "</div>";
 }
 
-function taskHTML(t){
-  const pr = TASK_PRIORITY[t.priority] || [];
-  const meta = [];
-  if(t.runs.total) meta.push(`${t.runs.total} 次运行${t.runs.failed ? ` · <span class="bad">${t.runs.failed} 失败</span>` : ""}${t.runs.active ? ' · <span class="ok">执行中</span>' : ""}`);
-  else meta.push("近期无运行记录");
-  if(t.checklist) meta.push(`检查项 ${t.checklist.done}/${t.checklist.total}`);
-  const elapsed = taskIntervals([t]).filter(r => r.measured).reduce((sum,r) => sum + r.end - r.start, 0);
-  if(elapsed) meta.push(`<span class="task-duration">累计执行 ${durationLabel(elapsed)}</span>`);
-  if(t.children.total) meta.push(`子任务 ${t.children.done}/${t.children.total}`);
-  const latest = t.comments.latest[t.comments.latest.length - 1];
-  const lastLine = latest ? (latest.text.split("\n").find(line => line.trim()) || "").trim() : "";
-  return `<details class="task-card" data-task="${esc(t.id)}"${taskOpen.has(t.id) ? " open" : ""}>
-    <summary class="task-summary">
-      <span class="task-top">
-        <span class="task-id">${esc(t.identifier || "任务")}</span>
-        ${pr.length ? `<span class="task-prio ${pr[1]}">${pr[0]}</span>` : ""}
-        ${t.relation !== "assigned" ? `<span class="task-rel">${t.relation === "addressed" ? "点名" : "参与"}</span>` : ""}
-        ${statusChip(t.status)}
-        <span class="task-age">${esc(ageLabel(ageFrom(t.lastActivityAt)))}</span>
-      </span>
-      <span class="task-title">${esc(t.title)}</span>
-      ${taskTrack(t)}
-      <span class="task-meta">${meta.join(" · ")}</span>
-      ${lastLine ? `<span class="task-last">${esc(latest.author)} · ${esc(ageLabel(ageFrom(latest.ts)))}：${esc(lastLine)}</span>` : ""}
-    </summary>
-    ${taskDetailHTML(t)}
-  </details>`;
-}
-
 function renderTasks(){
+  if(taskLayout !== 'trace') return;
   const box = $("#tasklist");
   const signature = JSON.stringify([tasks, tasksMeta.note, tasksMeta.groups, taskLayout, traceZoom, traceSelected, traceRange, traceOffset, $("#tasks-search").value, $("#tasks-filter").value, Math.floor(Date.now()/(tasks.some(t=>t.runs.active) ? 1000 : 60000))]);
   if(signature === tasksSignature) return;
   const pane = $("#taskspane"), scroll = pane.scrollTop;
-  Array.from(box.querySelectorAll("details[open]")).forEach(el => taskOpen.add(el.dataset.task));
   tasksSignature = signature;
   if(!tasks.length){
     box.innerHTML = '<div class="empty"><div class="big">✓</div><strong>暂无关联任务</strong><span>对话不会自动建单；新建或成员创建的任务会显示在这里。</span></div>';
@@ -1531,23 +1469,9 @@ function renderTasks(){
     pane.scrollTop = scroll;
     return;
   }
-  if(taskLayout === "trace"){
-    const traceScroll = box.querySelector('.trace-scroll')?.scrollLeft || 0;
-    box.innerHTML = taskTraceHTML(visible);
-    box.querySelector('.trace-scroll')?.scrollTo({left:traceScroll});
-    pane.scrollTop = scroll;
-    return;
-  }
-  const assigned = visible.filter(t => t.relation === "assigned");
-  const open = assigned.filter(t => !["done","cancelled"].includes(t.status));
-  const done = assigned.filter(t => ["done","cancelled"].includes(t.status));
-  const involved = visible.filter(t => t.relation !== "assigned");
-  let html = `<div class="task-overview"><span><strong>${visible.length}</strong>项任务</span><span><strong>${visible.filter(t=>t.runs.active).length}</strong>执行中</span><span><strong>${visible.filter(t=>t.status==='blocked').length}</strong>受阻</span></div>`;
-  if(open.length) html += `<div class="task-group"><span>名下未结</span><span class="n">${open.length}</span></div>` + open.map(taskHTML).join("");
-  if(involved.length) html += `<div class="task-group"><span>参与讨论</span><span class="n">${involved.length}</span></div>` + involved.map(taskHTML).join("");
-  if(done.length) html += `<div class="task-group"><span>最近完成</span><span class="n">共 ${tasksMeta.groups.done || done.length} 项</span></div>` + done.map(taskHTML).join("");
-  if(tasksMeta.note) html += `<div class="task-note task-scope">${esc(tasksMeta.note)}</div>`;
-  box.innerHTML = html;
+  const traceScroll = box.querySelector('.trace-scroll')?.scrollLeft || 0;
+  box.innerHTML = taskTraceHTML(visible);
+  box.querySelector('.trace-scroll')?.scrollTo({left:traceScroll});
   pane.scrollTop = scroll;
 }
 
@@ -1629,25 +1553,31 @@ function taskTraceHTML(items){
     html += '</div></div><div class="trace-legend"><span style="--swatch:#eda95a">执行中（至当前）</span><span style="--swatch:#a0d3b0">成功</span><span style="--swatch:#edafa7">失败 / 超时</span><span style="--swatch:#a2a9b4">排队 / 未知区间为时间点</span></div>';
   } else html += '<div class="task-note">当前时间窗口没有该成员的运行，可切换时间范围或向前翻页。</div>';
   if(missingCount) html += `<div class="task-note">${missingCount} 项任务未记录当前成员的执行时间，可在列表中查看任务进展。</div>`;
-  const selectedTask = items.find(t=>t.id === traceSelected?.task);
-  if(selectedTask){
-    const attempt = (selectedTask.attempts || []).find(r=>r.id === traceSelected.run && r.agentId === selected);
-    html += `<div class="trace-selected"><h4>${esc(selectedTask.identifier)} · ${esc(selectedTask.title)}</h4>${attempt ? `<div class="task-facts">${esc(attempt.agentName)} · ${esc(RUN_STATUS[attempt.status] || attempt.status)}<br>开始：${esc(attempt.startedAt ? traceTime(Date.parse(attempt.startedAt)) : '尚未开始 / 未记录')}<br>结束：${esc(attempt.finishedAt ? traceTime(Date.parse(attempt.finishedAt)) : ['running','cancelling'].includes(attempt.status) ? '执行中' : '未记录')}<br>运行：${esc(attempt.id)}</div>` : ''}${taskDetailHTML(selectedTask)}</div>`;
-  }
   html += `<div class="task-note task-scope">仅显示 ${esc(names[selected] || '当前成员')} 参与执行的运行；点击查看详情。最近活动范围按最后运行时间定位，可向前翻页；全部记录仍受后端查询窗口限制。${esc(tasksMeta.note)}</div>`;
   return html;
 }
 function setTaskLayout(layout){
+  const previous=taskLayout;
+  if(previous==='list' && layout==='trace') taskListScroll=$('#stream').scrollTop;
   taskLayout = layout;
   $('#tasks-list-view').setAttribute('aria-pressed', String(layout==='list'));
   $('#tasks-trace-view').setAttribute('aria-pressed', String(layout==='trace'));
-  preserveStreamLayout(()=>$('#sidepanel').classList.toggle('trace-wide', layout==='trace'));
-  renderTasks();
+  $('#taskrecords').hidden=layout==='trace';
+  $('#taskspane').hidden=layout!=='trace';
+  if(layout==='trace'){
+    if(!tasksLoaded) loadTasks();
+    tasksSignature=null;renderTasks();
+  }else{
+    renderTimeline();
+    if(previous==='trace') $('#stream').scrollTop=taskListScroll;
+    updateLatest();
+  }
 }
 $('#tasks-list-view').onclick = () => setTaskLayout('list');
 $('#tasks-trace-view').onclick = () => setTaskLayout('trace');
-$('#tasks-search').oninput = () => renderTasks();
-$('#tasks-filter').onchange = () => renderTasks();
+function refreshTaskView(){if(taskLayout==='trace') renderTasks();else renderTimeline();}
+$('#tasks-search').oninput = refreshTaskView;
+$('#tasks-filter').onchange = refreshTaskView;
 $('#tasklist').addEventListener('change', e=>{
   if(!e.target.matches('[data-trace-range]')) return;
   traceRange=e.target.value;traceOffset=0;traceZoom=1;traceSelected=null;renderTasks();
@@ -1666,25 +1596,15 @@ $('#tasklist').addEventListener('click', e=>{
   }
   const target = e.target.closest('[data-trace-task]');
   if(target){
-    traceSelected = {task:target.dataset.traceTask, run:target.dataset.traceRun};
-    renderTasks();
-    const detail = $('#tasklist .trace-selected');
-    if(detail){detail.tabIndex=-1;detail.focus({preventScroll:true});detail.scrollIntoView({block:'nearest'});}
+    openTaskDetail(target.dataset.traceTask,target.dataset.traceRun,null,target);
   }
 });
 
-$("#tasklist").addEventListener("toggle", e => {
-  const card = e.target.closest ? e.target.closest("details[data-task]") : null;
-  if(!card || !card.isConnected) return;
-  if(card.open) taskOpen.add(card.dataset.task); else taskOpen.delete(card.dataset.task);
-}, true);
-$("#taskspane").addEventListener("click", e => {
+$("#taskpane").addEventListener("click", e => {
   if(e.target.closest("[data-task-retry]")) loadTasks(true);
 });
-$("#paneltoggle").onclick = () => { if(panelOpen) closePanel(); else openPanel("tasks"); };
+$("#paneltoggle").onclick = () => { if(panelOpen) closePanel(); else openPanel(); };
 $("#closepanel").onclick = () => closePanel();
-$("#tab-tasks").onclick = () => setTab("tasks");
-$("#tab-message").onclick = () => setTab("message");
 
 /* ---------- 模型 ---------- */
 function renderModel(){
@@ -1738,8 +1658,9 @@ function selectAgent(id){
   tasks = []; tasksLoaded = false; tasksSignature = null; tasksAt = 0;
   chatMessages = []; chatInfo = null; chatState = "loading"; chatSignature = null;
   chatEnabled = false; chatReplying = false; chatAt = 0;
-  tasksMeta = {groups:{open:0}, note:""}; taskOpen.clear();
+  tasksMeta = {groups:{open:0}, note:""};
   traceSelected = null; traceZoom = 1; traceOffset = 0;
+  taskListScroll=0;
   $('#tasks-search').value = ''; $('#tasks-filter').value = 'all';
   $("#executionnotice").hidden = true;
   $("#tasknotice").hidden = true;
@@ -1756,7 +1677,7 @@ function selectAgent(id){
   $("#latest").hidden = true;
   $("#roomnotice").hidden = true;
   renderRail(); renderHead(); renderModel(); loadRoom(); loadExecution(); loadChat();
-  if(panelOpen) loadTasks();
+  loadTasks();
 }
 
 /* ---------- 消息流 ---------- */
@@ -1908,6 +1829,27 @@ function preserveStreamLayout(change){
   updateLatest();
 }
 function renderDetail(){
+  if(!activeMessage){
+    const target=detailTarget;
+    if(!target){
+      $('#detailcontent').innerHTML='<div class="empty"><strong>详情</strong><span>点击消息、任务或运行查看对应详情。</span></div>';
+      return;
+    }
+    const task=tasks.find(t=>t.id===target.taskId || target.issue && t.identifier===target.issue);
+    const issueEvent=roomEvents.find(e=>e.kind==='issue' && (e.issueId===target.taskId || target.issue && e.issue===target.issue));
+    const run=executionRuns.find(r=>r.id===target.runId);
+    const attempt=(task?.attempts || []).find(r=>r.id===target.runId) || (run ? {...run,startedAt:run.ts,agentName:names[run.agentId]} : null);
+    const signature=JSON.stringify([target,task,issueEvent,attempt,run?.summary]);
+    if(signature===detailSignature) return;
+    const key=JSON.stringify(target), same=$('#detailcontent').dataset.event===key, scroll=same ? $('#detailpane').scrollTop : 0;
+    let html=`<article class="comm-detail"><div class="output-label">${target.runId ? '运行与任务详情' : '任务详情'}</div><h3>${esc(task?.identifier || issueEvent?.issue || run?.issue || target.issue || '任务')} · ${esc(task?.title || issueEvent?.title || run?.issueTitle || '任务信息')}</h3>${statusChip(task?.status || issueEvent?.status)}</article>`;
+    if(attempt) html+=`<div class="comm-detail"><strong>${esc(attempt.agentName || names[attempt.agentId] || '未知成员')} · ${esc(RUN_STATUS[attempt.status] || attempt.status)}</strong><div class="task-facts">开始：${esc(attempt.startedAt ? traceTime(Date.parse(attempt.startedAt)) : '尚未开始 / 未记录')}<br>结束：${esc(attempt.finishedAt ? traceTime(Date.parse(attempt.finishedAt)) : ['running','cancelling'].includes(attempt.status) ? '执行中' : '未记录')}<br>运行：${esc(attempt.id)}</div>${run?.summary?.text ? `<div class="md">${md(run.summary.text)}</div>` : ''}${run?.error ? `<div class="task-error">${esc(run.error)}</div>` : ''}${run ? `<button type="button" class="text-button" data-jump-run="${esc(run.id)}">在列表中查看完整执行过程</button>` : ''}</div>`;
+    html+=task ? taskDetailHTML(task) : '<div class="comm-detail task-note">该任务不在当前任务详情查询窗口内；这里只显示已获取的记录。</div>';
+    $('#detailcontent').innerHTML=html;
+    $('#detailcontent').dataset.event=key;
+    $('#detailpane').scrollTop=scroll;detailSignature=signature;
+    return;
+  }
   const ev = messageEvents.get(activeMessage);
   if(!ev) return;
   const signature = JSON.stringify([activeMessage,ev,names]);
@@ -1915,7 +1857,7 @@ function renderDetail(){
   const same = $("#detailcontent").dataset.event === activeMessage;
   const scroll = same ? $("#detailpane").scrollTop : 0;
   const {from,to,title,evidence} = communication(ev), receipt = receiptView(ev);
-  $("#detailcontent").innerHTML = `<article class="comm-detail"><div class="detail-route">${avatarRoute(ev)}</div><div class="comm-address">${esc(from)} → ${esc(to)}</div><div class="comm-topic">来源：${esc(ev.issue || "任务")} · ${esc(title)}</div><div class="comm-meta"><time datetime="${esc(ev.ts)}">${dayLabel(ev.ts)} ${hhmm(ev.ts)}</time><span>${esc(evidence)}</span></div><div class="receipt-panel">${receipt.detail}</div><div class="txt ${ev.sender?.kind === "user" || ev.user ? "" : "md"}">${ev.sender?.kind === "user" || ev.user ? esc(ev.text) : md(ev.text)}</div></article>`;
+  $("#detailcontent").innerHTML = `<article class="comm-detail"><div class="output-label">消息详情</div><div class="detail-route">${avatarRoute(ev)}</div><div class="comm-address">${esc(from)} → ${esc(to)}</div><div class="comm-topic">来源：${esc(ev.issue || "任务")} · ${esc(title)}</div><button type="button" class="text-button" data-detail-task="${esc(ev.issueId || '')}" data-detail-issue="${esc(ev.issue || '')}">查看任务详情</button><div class="comm-meta"><time datetime="${esc(ev.ts)}">${dayLabel(ev.ts)} ${hhmm(ev.ts)}</time><span>${esc(evidence)}</span></div><div class="receipt-panel">${receipt.detail}</div><div class="txt ${ev.sender?.kind === "user" || ev.user ? "" : "md"}">${ev.sender?.kind === "user" || ev.user ? esc(ev.text) : md(ev.text)}</div></article>`;
   $("#detailcontent").dataset.event = activeMessage;
   $("#detailpane").scrollTop = scroll;
   detailSignature = signature;
@@ -1928,35 +1870,51 @@ function syncActiveMessage(){
   });
 }
 function closeDetail(restoreFocus = true){
-  const key = activeMessage;
-  activeMessage = null;
-  detailSignature = null;
-  if(panelTab === "message"){
-    panelTab = "tasks";
-    renderPanelTabs();
-    if(panelOpen && (!tasksLoaded || Date.now() - tasksAt > 15000)) loadTasks(true);
-  }
-  syncActiveMessage();
-  if(restoreFocus && key) Array.from($("#stream").querySelectorAll(".comm")).find(el=>el.dataset.event === key)?.querySelector("button").focus({preventScroll:true});
+  closePanel(restoreFocus);
 }
+function openTaskDetail(taskId,runId,issue,trigger){
+  activeMessage=null;detailTarget={taskId,runId,issue};
+  traceSelected={task:taskId,run:runId};detailSignature=null;
+  if(trigger) detailReturnFocus=trigger;
+  preserveStreamLayout(()=>openPanel());syncActiveMessage();
+  $('#detailpane').focus({preventScroll:true});
+}
+$('#detailpane').addEventListener('click',e=>{
+  const task=e.target.closest('[data-detail-task]');
+  if(task){openTaskDetail(task.dataset.detailTask,null,task.dataset.detailIssue);return;}
+  const jump=e.target.closest('[data-jump-run]');
+  if(jump){
+    const runId=jump.dataset.jumpRun;
+    closePanel(false);setTaskLayout('list');
+    Array.from($('#stream').querySelectorAll('[data-run]')).find(el=>el.dataset.run===runId)?.scrollIntoView({block:'start'});
+  }
+});
 document.addEventListener("keydown",e=>{
   if(e.key !== "Escape") return;
   if(!$("#taskmodal").hidden){e.preventDefault();closeTaskModal();return;}
-  if(activeMessage){e.preventDefault();closeDetail();}
-  else if(panelOpen && panelTab === "tasks" && $("#sidepanel").contains(document.activeElement)){e.preventDefault();closePanel();}
+  if(panelOpen){e.preventDefault();closePanel();}
 });
 $("#stream").addEventListener("click",e=>{
+  const task=e.target.closest('[data-issue-detail]');
+  if(task){openTaskDetail(task.dataset.issueDetail,null,task.dataset.issueKey,task);return;}
+  const runButton=e.target.closest('[data-execution-detail]');
+  if(runButton){const run=executionRuns.find(r=>r.id===runButton.dataset.executionDetail);if(run) openTaskDetail(null,run.id,run.issue,runButton);return;}
   const button = e.target.closest(".comm-summary");
   if(!button) return;
   const key = button.closest(".comm").dataset.event;
   if(activeMessage === key){closeDetail();return;}
   preserveStreamLayout(()=>{
     activeMessage = key;
-    openPanel("message");
+    detailTarget=null;traceSelected=null;detailReturnFocus=button;
+    openPanel();
     renderDetail();
   });
   syncActiveMessage();
   $("#detailpane").focus({preventScroll:true});
+});
+$('#stream').addEventListener('keydown',e=>{
+  const task=e.target.closest('[data-issue-detail]');
+  if(task && ['Enter',' '].includes(e.key)){e.preventDefault();task.click();}
 });
 
 const RUN_STATUS = {queued:"排队中",running:"已开始",succeeded:"运行成功",failed:"运行失败",timed_out:"运行超时",cancelled:"已取消",cancelling:"取消中"};
@@ -1980,7 +1938,7 @@ function receiptView(ev){
 
 function renderEvents(events){
   const box = $("#stream");
-  const signature = JSON.stringify([events, names]);
+  const signature = JSON.stringify([events, names, $('#tasks-search').value, $('#tasks-filter').value, tasks]);
   if(signature === roomSignature) return;
   // 没有变化就不重绘；有新记录时也保留正在读的通信条和展开状态。
   const first = roomSignature === null;
@@ -1992,8 +1950,16 @@ function renderEvents(events){
   roomSignature = signature;
   messageEvents = new Map(events.filter(ev=>ev.kind === "comment").map(ev=>[eventKey(ev),ev]));
   if(activeMessage && !messageEvents.has(activeMessage)) closeDetail(false);
+  const query=$('#tasks-search').value.trim().toLocaleLowerCase(), filter=$('#tasks-filter').value;
+  events=events.filter(ev=>{
+    const task=tasks.find(t=>t.id===ev.issueId || t.identifier===ev.issue);
+    const status=ev.kind==='issue' ? ev.status : task?.status;
+    const active=ev.kind==='execution' ? ['running','queued','cancelling'].includes(ev.status) : task?.runs?.active;
+    return (!query || `${ev.issue || ''} ${ev.issueTitle || ev.title || ''}`.toLocaleLowerCase().includes(query)) &&
+      (filter==='all' || filter==='active' && active || filter==='blocked' && status==='blocked' || filter==='open' && status && !['done','cancelled'].includes(status) || filter==='done' && ['done','cancelled'].includes(status));
+  });
   if(!events.length){
-    box.innerHTML = `<div class="stream-inner"><div class="empty"><div class="big">↗</div><strong>暂无任务时间线</strong><span>该成员最近没有任务消息。<br>需要沟通请切换到「对话」。</span></div></div>`;
+    box.innerHTML = `<div class="stream-inner"><div class="empty"><div class="big">↗</div><strong>${query || filter!=='all' ? '没有匹配的任务记录' : '暂无任务记录'}</strong><span>${query || filter!=='all' ? '试试其他关键词或状态。' : '该成员最近没有任务消息。<br>需要沟通请切换到「对话」。'}</span></div></div>`;
     updateLatest();
     return;
   }
@@ -2013,7 +1979,7 @@ function renderEvents(events){
     if(ev.kind === "issue"){
       const st = ev.status || "";
       const otherIssue = ev.mine === false;
-      html += `<div class="issue-sep ${otherIssue?"other":""}" data-event="${key}" title="${esc(ev.title)}">
+      html += `<div class="issue-sep ${otherIssue?"other":""}" data-event="${key}" title="${esc(ev.title)}" role="button" tabindex="0" data-issue-detail="${esc(ev.issueId || '')}" data-issue-key="${esc(ev.issue || '')}" aria-controls="sidepanel">
         ${eventIcon('task')}
         <span class="bar ${esc(st)}"></span>
         <span class="id">${esc(ev.issue)}</span>
@@ -2037,12 +2003,17 @@ function renderEvents(events){
     </div>`;
   }
   box.innerHTML = `<div class="stream-inner">${html}</div>`;
+  box.querySelectorAll('.execution-run').forEach(article=>{
+    const button=document.createElement('button');button.type='button';button.className='execution-inspect';
+    button.dataset.executionDetail=article.dataset.run;button.textContent='详情';
+    article.querySelector('.execution-head').append(button);
+  });
   box.querySelectorAll('[data-tool]').forEach(el=>el.addEventListener('toggle',()=>{
     if(!el.isConnected) return;
     if(el.open) toolExpanded.add(el.dataset.tool);else toolExpanded.delete(el.dataset.tool);
     updateLatest();
   }));
-  if(activeMessage) renderDetail();
+  if(panelOpen) renderDetail();
   if(stuck) box.scrollTop = box.scrollHeight;
   else {
     const nextAnchor = Array.from(box.querySelectorAll("[data-event]")).find(el => el.dataset.event === anchorKey);
@@ -2111,7 +2082,7 @@ function startTimers(){
   setInterval(() => { if(!document.hidden) refreshState(); }, 5000);
   setInterval(() => { if(!document.hidden) loadRoom(); }, 8000);
   setInterval(() => { if(!document.hidden) loadExecution(); }, 8000);
-  setInterval(() => { if(!document.hidden && panelOpen && panelTab === "tasks") loadTasks(); }, 8000);
+  setInterval(() => { if(!document.hidden && (view === 'tasks' || panelOpen)) loadTasks(); }, 8000);
   setInterval(() => { if(!document.hidden && view === "chat" && chatState !== "disabled" && chatState !== "empty") loadChat(); }, 4000);
   document.addEventListener("visibilitychange", () => {
     if(!document.hidden){
@@ -2119,7 +2090,7 @@ function startTimers(){
       loadRoom();
       loadExecution();
       if(view === "chat") loadChat();
-      if(panelOpen && panelTab === "tasks") loadTasks();
+      if(view === 'tasks' || panelOpen) loadTasks();
     }
   });
 }
