@@ -10,6 +10,14 @@ const assert = require('node:assert/strict');
     const page=await browser.newPage({viewport:{width:1440,height:900}}), errors=[];
     page.on('pageerror',e=>errors.push(e.message));
     await page.route('**/*',route=>route.fulfill({contentType:'text/html',body:readFileSync(join(__dirname,'../index.html'),'utf8').replace('boot();','/* offline fixture */')}));
+    let denseAttempts=0;
+    await page.route('**/api/run?**',route=>{
+      const url=new URL(route.request().url()),id=url.searchParams.get('run');
+      if(id==='b') return route.fulfill({json:{id:'b',agentId:'pl',status:'succeeded',state:'available',ts:'2026-10-22T08:02:00Z',entries:[{id:'old-reply',kind:'assistant',text:'历史运行的助手消息',ts:'2026-10-22T08:03:00Z'}]}});
+      if(id==='dense1' && ++denseAttempts>1) return route.fulfill({json:{id:'dense1',agentId:'pl',status:'succeeded',state:'available',ts:'2026-10-22T08:00:00Z',entries:[{id:'retry',kind:'assistant',text:'重试后恢复执行过程',ts:'2026-10-22T08:00:01Z'}]}});
+      if(url.searchParams.has('before')) return route.fulfill({json:{state:'available',nextCursor:null,entries:[{id:'m-1',kind:'assistant',text:'更早的助手消息',ts:'2026-10-22T07:59:00Z'},{id:'m-20',kind:'assistant',text:'当前助手消息',ts:'2026-10-22T08:03:00Z'}]}});
+      return route.fulfill({status:503,json:{error:'temporary'}});
+    });
     await page.goto('http://paperclip.test/');
     await page.evaluate(()=>{
       selected='pl';names={pl:'PL',qa:'QA'};agents=[{id:'pl',name:'PL'}];
@@ -25,7 +33,7 @@ const assert = require('node:assert/strict');
         {id:'issue',kind:'issue',issueId:'one',issue:'HER-1',title:'并行任务',status:'in_progress',ts:'2026-10-22T08:00:00Z'},
         {id:'comment',kind:'comment',issueId:'one',issue:'HER-1',issueTitle:'并行任务',text:'给 QA\n请验收',sender:{name:'PL'},recipients:[{name:'QA'}],ts:'2026-10-22T08:01:00Z'},
       ];
-      executionRuns=[{id:'a',agentId:'pl',status:'succeeded',issue:'HER-1',issueTitle:'并行任务',ts:'2026-10-22T08:00:00Z',state:'available',entries:[{id:'tool',kind:'tool_call',name:'terminal',text:'{"command":"true"}',ts:'2026-10-22T08:02:00Z'}]}];
+      executionRuns=[{id:'a',agentId:'pl',status:'succeeded',issue:'HER-1',issueTitle:'并行任务',ts:'2026-10-22T08:00:00Z',state:'available',nextCursor:20,entries:[{id:'tool',kind:'tool_call',toolCallId:'call',name:'terminal',text:'{"command":"true"}',ts:'2026-10-22T08:02:00Z'},{id:'result',kind:'tool_result',toolCallId:'call',text:'tool-result',ts:'2026-10-22T08:02:10Z'},{id:'m-20',kind:'assistant',text:'当前助手消息',ts:'2026-10-22T08:03:00Z'}]}];
       executionLoaded=true;renderTimeline();setView('tasks');
       const intervals=taskIntervals([{...tasks[0],attempts:[run('live','pl','2026-10-22T08:00:00Z',null,'running'),run('missing','pl','2026-10-22T08:00:00Z',null,'failed'),run('bad','pl','2026-10-22T08:05:00Z','2026-10-22T08:00:00Z'),run('invalid','pl','invalid',null)]}],Date.parse('2026-10-22T08:10:00Z'));
       if(intervals.length!==3 || intervals.filter(r=>r.measured).length!==1 || intervals.find(r=>r.run.id==='live').end-intervals.find(r=>r.run.id==='live').start!==600000) throw Error('区间计算错误');
@@ -36,18 +44,37 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('#taskpane .task-controls').count(),1);
     assert.equal(await page.locator('#taskspane').isHidden(),true);
     assert.equal(await page.locator('#stream [data-event]').count(),3);
-    await page.locator('.tool-step summary').click();
-    await page.locator('.comm-summary').click();
+    assert.equal(await page.locator('#stream .tool-step').count(),0);
+    assert.equal(await page.locator('#stream .assistant-output').count(),0);
+    await page.locator('.comm .comm-summary').click();
     assert.match(await page.locator('#detailcontent').innerText(),/消息详情/);
     await page.locator('[data-detail-task]').click();
     assert.match(await page.locator('#detailcontent').innerText(),/任务详情/);
+    await page.getByText('历史运行的助手消息',{exact:true}).waitFor();
     await page.locator('#closepanel').click();
     await page.locator('[data-issue-detail]').press('Enter');
     assert.match(await page.locator('#detailcontent').innerText(),/HER-1/);
     await page.keyboard.press('Escape');
     await page.locator('[data-execution-detail]').click();
     assert.match(await page.locator('#detailcontent').innerText(),/运行：a/);
-    await page.locator('[data-jump-run]').click();
+    assert.match(await page.locator('#detailcontent').innerText(),/当前助手消息/);
+    assert.equal(await page.locator('#detailcontent .tool-step').count(),1);
+    await page.locator('#detailcontent .tool-step summary').click();
+    assert.match(await page.locator('#detailcontent .tool-body').innerText(),/tool-result/);
+    await page.locator('[data-run-more]').click();
+    await page.getByText('更早的助手消息',{exact:true}).waitFor();
+    assert.equal(await page.locator('[data-output="m-20"]').count(),1);
+    assert.equal(await page.locator('#detailcontent .tool-step[open]').count(),1);
+    assert.equal(await page.locator('[data-run-more]').count(),0);
+    await page.evaluate(()=>{
+      executionRuns[0].entries.push(...Array.from({length:20},(_,i)=>({id:`extra-${i}`,kind:'assistant',text:`新增消息 ${i}`,ts:'2026-10-22T08:04:00Z'})));
+      renderTimeline();$('#detailpane').scrollTop=120;
+    });
+    await page.evaluate(()=>{executionRuns[0].entries.push({id:'live',kind:'assistant',text:'实时新增消息',ts:'2026-10-22T08:05:00Z'});renderTimeline();});
+    assert.equal(await page.locator('#detailpane').evaluate(el=>el.scrollTop),120);
+    assert.match(await page.locator('#detailcontent').innerText(),/实时新增消息/);
+    assert.equal(await page.locator('#detailcontent .tool-step[open]').count(),1);
+    await page.locator('[data-execution-detail]').click();
     assert.equal(await page.locator('#sidepanel').isHidden(),true);
     await page.locator('#tasks-trace-view').click();
     assert.equal(await page.locator('#taskrecords').isHidden(),true);
@@ -69,7 +96,9 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('.trace-scroll').evaluate(el=>el.scrollLeft),120);
     await page.locator('#tasks-list-view').click();
     assert.equal(await page.locator('#taskspane').isHidden(),true);
-    assert.equal(await page.locator('.tool-step[open]').count(),1);
+    await page.locator('[data-execution-detail]').click();
+    assert.equal(await page.locator('#detailcontent .tool-step[open]').count(),1);
+    await page.locator('#closepanel').click();
     await page.locator('#tasks-search').fill('missing');
     assert.equal(await page.locator('#stream [data-event]').count(),0);
     await page.locator('#tasks-search').fill('HER-1');
@@ -83,9 +112,10 @@ const assert = require('node:assert/strict');
       for(const layout of ['list','trace']){
         await page.evaluate(layout=>setTaskLayout(layout),layout);
         assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`overflow ${width}/${layout}`);
-        const trigger=layout==='list' ? page.locator('.comm-summary') : page.locator('[data-trace-run="a"]');
+        const trigger=layout==='list' ? page.locator('.comm .comm-summary') : page.locator('[data-trace-run="a"]');
         await trigger.click();
         assert.equal(await page.locator('#sidepanel').isVisible(),true);
+        assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`detail overflow ${width}/${layout}`);
         if(width<=760) assert.equal(await page.locator('#conversation').isVisible(),false);
         await page.locator('#closepanel').click();
         assert.equal(await page.locator('#conversation').isVisible(),true);
@@ -94,6 +124,8 @@ const assert = require('node:assert/strict');
       const rows=await page.locator('#stream [data-event]').evaluateAll(els=>els.map(el=>({left:el.getBoundingClientRect().left,width:el.getBoundingClientRect().width})));
       assert.ok(rows.every(row=>Math.abs(row.width-rows[0].width)<1&&Math.abs(row.left-rows[0].left)<1));
       for(const kind of ['task','message','execution']) assert.equal(await page.locator(`#stream .event-icon.${kind}`).count(),1);
+      assert.equal(await page.locator('#stream .tool-step,#stream .assistant-output').count(),0);
+      assert.ok(await page.locator('.execution-summary').evaluate(el=>el.getBoundingClientRect().height<=60));
     }
     await page.evaluate(()=>{
       const task=tasks[0],start=Date.parse('2026-10-22T08:00:00Z');
@@ -106,6 +138,11 @@ const assert = require('node:assert/strict');
     for(const id of ['dense1','dense2']){
       await page.locator(`[data-trace-run="${id}"]`).click();
       assert.match(await page.locator('#detailcontent').innerText(),new RegExp(`运行：${id}`));
+      if(id==='dense1'){
+        await page.locator('[data-run-retry]').waitFor();
+        await page.locator('[data-run-retry]').click();
+        await page.getByText('重试后恢复执行过程',{exact:true}).waitFor();
+      }
       await page.locator('#closepanel').click();
     }
     await page.locator('[data-trace-range]').selectOption('1h');
@@ -114,6 +151,6 @@ const assert = require('node:assert/strict');
     await page.locator('[data-trace-window="next"]').click();
     assert.equal(await page.locator('[data-trace-run="far"]').count(),1);
     assert.deepEqual(errors,[]);
-    console.log('PASS: central list/timeline replacement; unified message/task/run details; keyboard/mobile close; scope, ranges, dense clicks, zoom/scroll, tool expansion, filters and 4 viewports');
+    console.log('PASS: collapsed execution rows; sidebar tools/replies, history/pagination/dedup, live updates and scroll/expansion retention; central views, details, filters and 4 viewports');
   }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

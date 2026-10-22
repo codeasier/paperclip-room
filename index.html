@@ -260,6 +260,16 @@ section{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 #stream .issue-sep{min-height:52px;padding:9px 13px;gap:10px}
 #stream .issue-sep.other{opacity:1}
 #stream .execution-run{padding:13px}
+#stream .execution-run.execution-row{padding:0;overflow:hidden;background:#fafbfc}
+.execution-summary .ava{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-size:10px;font-weight:700;flex:none}
+.execution-row.active{border-color:#dfac8f!important;background:#fff7f1!important;box-shadow:0 0 0 2px #c6521309}
+.execution-summary:focus-visible{outline-offset:-3px}
+.execution-time{font-size:10px;color:var(--ink-3);white-space:nowrap;flex:none}
+.execution-process{padding:0 16px 16px;min-width:0}
+.execution-process h4{font-size:12px;margin:8px 0 12px}
+.execution-process .assistant-output{font-size:13px}
+.execution-process .tool-name{max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:1100px){.execution-time{display:none}}
 .comm-summary{display:flex;width:100%;text-align:left;align-items:center;gap:10px;min-height:52px;padding:9px 13px;cursor:pointer;user-select:none;border:0;background:transparent}
 .comm-summary::-webkit-details-marker{display:none}
 .comm-summary:hover{background:#f1f4f8}
@@ -778,6 +788,8 @@ let view = "chat", taskSubmitting = false, taskReturnFocus = null;
 let panelOpen = false, detailTarget = null, detailReturnFocus = null;
 let roomEvents = [], executionRuns = [], executionRequest = null, executionSequence = 0, executionLoaded = false;
 const toolExpanded = new Set(), moreLoading = new Set();
+const detailRuns = new Map(), detailRunLoading = new Set(), detailRunErrors = new Map();
+let detailRunEpoch = 0;
 let stateBusy = false, stateEpoch = 0, roomRequest = null, roomSequence = 0;
 let roomSignature = null, railSignature = "", lastSync = "";
 
@@ -1003,6 +1015,7 @@ function resetTeamView(){
   syncActiveMessage();
   selected = null; agents = []; names = {}; drafts.clear();
   roomEvents = []; executionRuns = []; executionLoaded = false;
+  detailRunEpoch++;detailRuns.clear();detailRunLoading.clear();detailRunErrors.clear();moreLoading.clear();
   roomSignature = null; railSignature = "";
   tasks = []; tasksLoaded = false; tasksSignature = null; tasksAt = 0;
   chatMessages = []; chatInfo = null; chatState = "loading"; chatSignature = null;
@@ -1377,7 +1390,7 @@ function closePanel(restoreFocus = true){
   syncActiveMessage();
   updateTaskBadge();
   if(taskLayout === 'trace'){tasksSignature=null;renderTasks();}
-  const replacedTrigger=returnData.traceRun ? Array.from($('#tasklist').querySelectorAll('[data-trace-run]')).find(el=>el.dataset.traceRun===returnData.traceRun) : returnData.traceTask ? Array.from($('#tasklist').querySelectorAll('[data-trace-task]')).find(el=>el.dataset.traceTask===returnData.traceTask) : null;
+  const replacedTrigger=returnData.executionDetail ? Array.from($('#stream').querySelectorAll('[data-execution-detail]')).find(el=>el.dataset.executionDetail===returnData.executionDetail) : returnData.traceRun ? Array.from($('#tasklist').querySelectorAll('[data-trace-run]')).find(el=>el.dataset.traceRun===returnData.traceRun) : returnData.traceTask ? Array.from($('#tasklist').querySelectorAll('[data-trace-task]')).find(el=>el.dataset.traceTask===returnData.traceTask) : null;
   if(restoreFocus) (detailReturnFocus?.isConnected ? detailReturnFocus : replacedTrigger || $("#paneltoggle")).focus({preventScroll:true});
   detailReturnFocus=null;
 }
@@ -1655,6 +1668,7 @@ function selectAgent(id){
   tasksRequest?.controller.abort(); tasksRequest = null; tasksSequence++;
   chatRequest?.controller.abort(); chatRequest = null; chatSequence++;
   roomEvents = []; executionRuns = []; executionLoaded = false;
+  detailRunEpoch++;detailRuns.clear();detailRunLoading.clear();detailRunErrors.clear();moreLoading.clear();
   tasks = []; tasksLoaded = false; tasksSignature = null; tasksAt = 0;
   chatMessages = []; chatInfo = null; chatState = "loading"; chatSignature = null;
   chatEnabled = false; chatReplying = false; chatAt = 0;
@@ -1729,6 +1743,10 @@ async function loadExecution(force = false){
     executionLoaded = true;
     $('#executionnotice').hidden = true;
     renderTimeline();
+    if(panelOpen && detailTarget?.runId && !executionRuns.some(r=>r.id===detailTarget.runId)){
+      const run=detailRuns.get(detailTarget.runId);
+      if(run && ['running','queued','cancelling'].includes(run.status)) loadDetailRun(run.id,true);
+    }
   }catch(e){
     if(id!==selected || sequence!==executionSequence) return;
     $('#executionnotice').hidden = false;
@@ -1743,10 +1761,10 @@ function renderTimeline(){
   events.sort((a,b)=>(a.ts||'').localeCompare(b.ts||''));
   renderEvents(events);
 }
-function executionHTML(run){
+function executionBodyHTML(run){
   const entries = run.entries || [], results = new Map(entries.filter(e=>e.kind==='tool_result' && e.toolCallId).map(e=>[e.toolCallId,e]));
   const calls = new Set(entries.filter(e=>e.kind==='tool_call').map(e=>e.toolCallId));
-  const terminal = !['running','queued'].includes(run.status);
+  const terminal = !['running','queued','cancelling'].includes(run.status);
   let content = '';
   for(const entry of entries){
     if(entry.kind==='assistant'){
@@ -1764,22 +1782,59 @@ function executionHTML(run){
   const summary = run.summary?.text;
   if(summary && !entries.some(e=>e.kind==='assistant' && e.text.trim()===summary.trim())) content+=`<div class="assistant-output md"><div class="output-label">运行最终回复</div>${md(summary)}${run.summary.truncated?'<div class="execution-warning">最终回复过长，已截断。</div>':''}</div>`;
   if(!content) content=`<div class="execution-meta">${['running','queued'].includes(run.status)?'等待助手输出；运行期间自动刷新。':'本次没有记录助手输出。'}</div>`;
-  return `<article class="execution-run" data-event="${eventKey({...run,kind:'execution'})}" data-run="${esc(run.id)}"><div class="execution-head">${eventIcon('execution')}${avatar(names[run.agentId] || names[selected])}<div class="execution-heading">${esc(run.issue || '')} · ${esc(run.issueTitle || '运行会话')}<div class="execution-meta">${dayLabel(run.ts)} ${hhmm(run.ts)}${run.finishedAt?' — '+hhmm(run.finishedAt):''} · 运行 ${esc(run.id.slice(0,8))}</div></div><span class="execution-status ${esc(run.status)}">${esc(RUN_STATUS[run.status] || run.status)}</span></div>${run.state!=='available'?`<div class="execution-warning">${esc(run.note || '会话详情不可用，仅展示已记录的运行结果。')}</div>`:''}${run.nextCursor?`<button class="execution-more" data-run-more="${esc(run.id)}" ${moreLoading.has(run.id)?'disabled':''}>${moreLoading.has(run.id)?'正在加载…':'↑ 加载本次运行更早的过程'}</button>`:''}${content}${run.error?`<div class="execution-warning">${esc(run.error)}</div>`:''}</article>`;
+  return `<div class="execution-process" data-process-run="${esc(run.id)}"><h4>工具调用与助手消息</h4>${run.state!=='available'?`<div class="execution-warning">${esc(run.note || '会话详情不可用，仅展示已记录的运行结果。')}</div>`:''}${run.nextCursor?`<button class="execution-more" data-run-more="${esc(run.id)}" ${moreLoading.has(run.id)?'disabled':''}>${moreLoading.has(run.id)?'正在加载…':'↑ 加载本次运行更早的过程'}</button>`:''}${content}${run.error?`<div class="execution-warning">${esc(run.error)}</div>`:''}</div>`;
 }
-$('#stream').addEventListener('click',async e=>{
+function executionHTML(run){
+  const active=panelOpen && detailTarget?.runId===run.id;
+  const title=`${run.issue || '任务'} · ${run.issueTitle || '运行会话'}`;
+  return `<article class="execution-run execution-row ${active?'active':''}" data-event="${eventKey({...run,kind:'execution'})}" data-run="${esc(run.id)}"><button type="button" class="execution-summary comm-summary" data-execution-detail="${esc(run.id)}" aria-controls="sidepanel" aria-expanded="${active}" aria-label="${esc(title+' · '+(RUN_STATUS[run.status] || run.status)+'，查看执行过程')}" title="${esc(title)}">${eventIcon('execution')}${avatar(names[run.agentId] || names[selected])}<span class="comm-title">${esc(title)}</span><time class="execution-time">${dayLabel(run.ts)} ${hhmm(run.ts)}</time><span class="receipt-badge ${['failed','timed_out'].includes(run.status)?'failure':['running','queued','cancelling'].includes(run.status)?'active':run.status==='succeeded'?'success':''}">${esc(RUN_STATUS[run.status] || run.status)}</span><svg class="comm-chevron" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 4 4 4-4 4"/></svg></button></article>`;
+}
+function executionById(id){return executionRuns.find(r=>r.id===id) || detailRuns.get(id);}
+async function loadDetailRun(runId,force=false){
+  if(!selected || detailRunLoading.has(runId) || !force && (detailRuns.has(runId) || detailRunErrors.has(runId))) return;
+  const agent=selected,company=teamId,epoch=detailRunEpoch;
+  detailRunLoading.add(runId);detailRunErrors.delete(runId);
+  try{
+    const run=await requestJSON(`/api/run?agent=${encodeURIComponent(agent)}&run=${encodeURIComponent(runId)}`);
+    if(selected!==agent || teamId!==company || epoch!==detailRunEpoch) return;
+    if(run.id!==runId || run.agentId!==agent) throw new Error('运行标识不一致');
+    const old=detailRuns.get(runId);
+    detailRuns.set(runId,old?.extended ? {...run,entries:mergedEntries(old.entries,run.entries),nextCursor:old.nextCursor,extended:true} : run);
+  }catch(e){if(selected===agent && teamId===company && epoch===detailRunEpoch) detailRunErrors.set(runId,'执行过程暂时读取失败，可重试。');}
+  finally{
+    if(selected===agent && teamId===company && epoch===detailRunEpoch){
+      detailRunLoading.delete(runId);
+      if(panelOpen && detailTarget?.runId===runId) renderDetail();
+    }
+  }
+}
+function bindToolDetails(container){
+  container.querySelectorAll('[data-tool]').forEach(el=>el.addEventListener('toggle',()=>{
+    if(!el.isConnected) return;
+    if(el.open) toolExpanded.add(el.dataset.tool);else toolExpanded.delete(el.dataset.tool);
+  }));
+}
+$('#detailpane').addEventListener('click',async e=>{
   const button = e.target.closest('[data-run-more]');
   if(!button) return;
-  const id=selected, runId=button.dataset.runMore, run=executionRuns.find(r=>r.id===runId);
+  const id=selected,company=teamId,epoch=detailRunEpoch, runId=button.dataset.runMore, run=executionById(runId);
   if(!run?.nextCursor || moreLoading.has(runId)) return;
   moreLoading.add(runId); button.disabled=true; button.textContent='正在加载…';
+  const pane=$('#detailpane'), oldHeight=pane.scrollHeight,oldTop=pane.scrollTop;
   try{
     const page=await requestJSON(`/api/run?agent=${encodeURIComponent(id)}&run=${encodeURIComponent(runId)}&before=${run.nextCursor}`);
-    if(selected!==id) return;
+    if(selected!==id || teamId!==company || epoch!==detailRunEpoch) return;
     if(page.state!=='available') throw new Error(page.note || '会话读取失败');
-    const current=executionRuns.find(r=>r.id===runId);
+    const current=executionById(runId);
     if(current){current.entries=mergedEntries(page.entries,current.entries);current.nextCursor=page.nextCursor;current.extended=true;}
   }catch(e){toast('读取更早过程失败，请重试');}
-  finally{moreLoading.delete(runId);if(id===selected){roomSignature='';renderTimeline();}}
+  finally{
+    if(epoch===detailRunEpoch) moreLoading.delete(runId);
+    if(id===selected && company===teamId && epoch===detailRunEpoch && panelOpen && detailTarget?.runId===runId){
+      detailSignature=null;renderDetail();
+      pane.scrollTop=oldTop+Math.max(0,pane.scrollHeight-oldHeight);
+    }
+  }
 });
 
 function eventKey(ev){
@@ -1837,15 +1892,19 @@ function renderDetail(){
     }
     const task=tasks.find(t=>t.id===target.taskId || target.issue && t.identifier===target.issue);
     const issueEvent=roomEvents.find(e=>e.kind==='issue' && (e.issueId===target.taskId || target.issue && e.issue===target.issue));
-    const run=executionRuns.find(r=>r.id===target.runId);
-    const attempt=(task?.attempts || []).find(r=>r.id===target.runId) || (run ? {...run,startedAt:run.ts,agentName:names[run.agentId]} : null);
-    const signature=JSON.stringify([target,task,issueEvent,attempt,run?.summary]);
+    if(!target.runId) target.runId=latestTaskRunId(task,target.issue || issueEvent?.issue);
+    const run=executionById(target.runId);
+    if(target.runId && !run) loadDetailRun(target.runId);
+    const attempt=(run ? {...run,startedAt:run.ts,agentName:names[run.agentId]} : null) || (task?.attempts || []).find(r=>r.id===target.runId);
+    const signature=JSON.stringify([target,task,issueEvent,attempt,run,detailRunLoading.has(target.runId),detailRunErrors.get(target.runId),moreLoading.has(target.runId)]);
     if(signature===detailSignature) return;
     const key=JSON.stringify(target), same=$('#detailcontent').dataset.event===key, scroll=same ? $('#detailpane').scrollTop : 0;
     let html=`<article class="comm-detail"><div class="output-label">${target.runId ? '运行与任务详情' : '任务详情'}</div><h3>${esc(task?.identifier || issueEvent?.issue || run?.issue || target.issue || '任务')} · ${esc(task?.title || issueEvent?.title || run?.issueTitle || '任务信息')}</h3>${statusChip(task?.status || issueEvent?.status)}</article>`;
-    if(attempt) html+=`<div class="comm-detail"><strong>${esc(attempt.agentName || names[attempt.agentId] || '未知成员')} · ${esc(RUN_STATUS[attempt.status] || attempt.status)}</strong><div class="task-facts">开始：${esc(attempt.startedAt ? traceTime(Date.parse(attempt.startedAt)) : '尚未开始 / 未记录')}<br>结束：${esc(attempt.finishedAt ? traceTime(Date.parse(attempt.finishedAt)) : ['running','cancelling'].includes(attempt.status) ? '执行中' : '未记录')}<br>运行：${esc(attempt.id)}</div>${run?.summary?.text ? `<div class="md">${md(run.summary.text)}</div>` : ''}${run?.error ? `<div class="task-error">${esc(run.error)}</div>` : ''}${run ? `<button type="button" class="text-button" data-jump-run="${esc(run.id)}">在列表中查看完整执行过程</button>` : ''}</div>`;
+    if(attempt) html+=`<div class="comm-detail"><strong>${esc(attempt.agentName || names[attempt.agentId] || '未知成员')} · ${esc(RUN_STATUS[attempt.status] || attempt.status)}</strong><div class="task-facts">开始：${esc(attempt.startedAt ? traceTime(Date.parse(attempt.startedAt)) : '尚未开始 / 未记录')}<br>结束：${esc(attempt.finishedAt ? traceTime(Date.parse(attempt.finishedAt)) : ['running','cancelling'].includes(attempt.status) ? '执行中' : '未记录')}<br>运行：${esc(attempt.id)}</div></div>`;
+    html+=run ? executionBodyHTML(run) : target.runId ? `<div class="comm-detail task-note">${detailRunErrors.has(target.runId) ? `${esc(detailRunErrors.get(target.runId))}<button type="button" class="text-button" data-run-retry="${esc(target.runId)}">重试</button>` : '正在读取工具调用与助手消息…'}</div>` : '<div class="comm-detail task-note">当前查询窗口暂无该成员的执行过程。</div>';
     html+=task ? taskDetailHTML(task) : '<div class="comm-detail task-note">该任务不在当前任务详情查询窗口内；这里只显示已获取的记录。</div>';
     $('#detailcontent').innerHTML=html;
+    bindToolDetails($('#detailcontent'));
     $('#detailcontent').dataset.event=key;
     $('#detailpane').scrollTop=scroll;detailSignature=signature;
     return;
@@ -1868,6 +1927,11 @@ function syncActiveMessage(){
     el.classList.toggle("active",active);
     el.querySelector("button").setAttribute("aria-expanded",String(active));
   });
+  $('#stream').querySelectorAll('.execution-row').forEach(el=>{
+    const active=panelOpen && detailTarget?.runId===el.dataset.run;
+    el.classList.toggle('active',active);
+    el.querySelector('button').setAttribute('aria-expanded',String(active));
+  });
 }
 function closeDetail(restoreFocus = true){
   closePanel(restoreFocus);
@@ -1879,15 +1943,15 @@ function openTaskDetail(taskId,runId,issue,trigger){
   preserveStreamLayout(()=>openPanel());syncActiveMessage();
   $('#detailpane').focus({preventScroll:true});
 }
+function latestTaskRunId(task,issue){
+  const candidates=[...(task?.attempts || []),...executionRuns.filter(r=>issue && r.issue===issue)];
+  return candidates.filter(r=>r.agentId===selected).sort((a,b)=>(b.startedAt || b.ts || b.createdAt || '').localeCompare(a.startedAt || a.ts || a.createdAt || ''))[0]?.id;
+}
 $('#detailpane').addEventListener('click',e=>{
   const task=e.target.closest('[data-detail-task]');
   if(task){openTaskDetail(task.dataset.detailTask,null,task.dataset.detailIssue);return;}
-  const jump=e.target.closest('[data-jump-run]');
-  if(jump){
-    const runId=jump.dataset.jumpRun;
-    closePanel(false);setTaskLayout('list');
-    Array.from($('#stream').querySelectorAll('[data-run]')).find(el=>el.dataset.run===runId)?.scrollIntoView({block:'start'});
-  }
+  const retry=e.target.closest('[data-run-retry]');
+  if(retry){loadDetailRun(retry.dataset.runRetry,true);detailSignature=null;renderDetail();}
 });
 document.addEventListener("keydown",e=>{
   if(e.key !== "Escape") return;
@@ -1898,7 +1962,11 @@ $("#stream").addEventListener("click",e=>{
   const task=e.target.closest('[data-issue-detail]');
   if(task){openTaskDetail(task.dataset.issueDetail,null,task.dataset.issueKey,task);return;}
   const runButton=e.target.closest('[data-execution-detail]');
-  if(runButton){const run=executionRuns.find(r=>r.id===runButton.dataset.executionDetail);if(run) openTaskDetail(null,run.id,run.issue,runButton);return;}
+  if(runButton){
+    const run=executionRuns.find(r=>r.id===runButton.dataset.executionDetail);
+    if(run){if(panelOpen && detailTarget?.runId===run.id) closePanel();else openTaskDetail(null,run.id,run.issue,runButton);}
+    return;
+  }
   const button = e.target.closest(".comm-summary");
   if(!button) return;
   const key = button.closest(".comm").dataset.event;
@@ -1964,7 +2032,7 @@ function renderEvents(events){
     return;
   }
 
-  let html = `<div class="timeline-note">助手回复与执行过程 · 头像消息可在右侧查看详情</div>${executionLoaded?'<div class="execution-note">最近 4 次运行 · 工具调用可展开查看参数与结果</div>':''}`, lastDay = "";
+  let html = `<div class="timeline-note">消息与任务默认收起 · 点击在右侧查看详情</div>${executionLoaded?'<div class="execution-note">最近 4 次运行 · 工具调用与助手消息在右侧展示</div>':''}`, lastDay = "";
   for(const ev of events){
     const key = eventKey(ev);
     const day = dayKey(ev.ts);
@@ -2003,16 +2071,7 @@ function renderEvents(events){
     </div>`;
   }
   box.innerHTML = `<div class="stream-inner">${html}</div>`;
-  box.querySelectorAll('.execution-run').forEach(article=>{
-    const button=document.createElement('button');button.type='button';button.className='execution-inspect';
-    button.dataset.executionDetail=article.dataset.run;button.textContent='详情';
-    article.querySelector('.execution-head').append(button);
-  });
-  box.querySelectorAll('[data-tool]').forEach(el=>el.addEventListener('toggle',()=>{
-    if(!el.isConnected) return;
-    if(el.open) toolExpanded.add(el.dataset.tool);else toolExpanded.delete(el.dataset.tool);
-    updateLatest();
-  }));
+  syncActiveMessage();
   if(panelOpen) renderDetail();
   if(stuck) box.scrollTop = box.scrollHeight;
   else {
