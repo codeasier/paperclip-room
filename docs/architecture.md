@@ -23,13 +23,14 @@ Python ThreadingHTTPServer (server.py)
 | --- | --- | --- |
 | GET | `/`、`/index.html` | 静态页面，按请求读盘 |
 | GET | `/api/state` | 公司成员、当前任务、活跃运行与模型快照 |
+| GET | `/api/tasks?agent=<id>` | 成员名下未结/最近完成任务，以及最近参与或被点名的其他任务；含检查项、运行与讨论摘要 |
 | GET | `/api/room?agent=<id>` | 成员相关任务、评论与精确运行回执 |
 | GET | `/api/execution?agent=<id>` | 当前成员最近4次运行及最新过程页 |
 | GET | `/api/run?agent=<id>&run=<uuid>&before=<cursor>` | 指定运行的更早过程页；校验公司与成员归属 |
 | POST | `/api/send` | JSON `{ "agentId": "…", "text": "…" }`；追加评论或新建任务 |
 | POST | `/api/model` | JSON `{ "agentId": "…", "model": "…" }`；修改 adapterConfig.model |
 
-响应使用 JSON 和 `Cache-Control: no-store`。没有 SSE/WebSocket；状态5秒轮询，评论和过程8秒轮询，标签页进入后台时暂停。环境配置在进程启动时读取。
+响应使用 JSON 和 `Cache-Control: no-store`。没有 SSE/WebSocket；状态5秒轮询，任务进展、评论和过程8秒轮询，标签页进入后台时暂停。环境配置在进程启动时读取。
 
 ## Paperclip 接口依赖
 
@@ -56,6 +57,9 @@ Python ThreadingHTTPServer (server.py)
 ## 查询边界
 
 - 任务聚合查询带 `limit=100`，具体返回行为由上游版本决定。
+- 任务进展取最近100个任务：名下未结全部保留、已完成只列最近4项；参与讨论只扫描最近12个其他任务，不是全历史。
+- 检查项只读取任务描述中的 Markdown 勾选行，忽略代码块；描述被平台截断时标注“描述已截断”，不推测剩余项。
+- 任务运行统计来自最近200次 heartbeat runs，按 `contextSnapshot` 的 `issueId` / `taskId` 精确归属；窗口内没有记录时显示“近期无运行记录”，不推断为从未运行。
 - 评论时间线扫描最近6个名下任务与12个其他任务，输出最近160个事件，不是全历史。
 - 接收对象只依据评论首行明确指向；未指定对象的消息显示实际任务讨论区。
 - 回执查询最近至多200条heartbeat runs，缓存4秒，以评论ID与任务ID双重精确匹配唤醒上下文。未查到不等于无人接收，运行成功不等于逐条已读或业务验收。
@@ -66,6 +70,7 @@ Python ThreadingHTTPServer (server.py)
 
 - 成员草稿保存在当前页面的Map中，不写localStorage，刷新丢失。
 - 切成员时取消旧请求并校验请求序列，避免延迟响应覆盖当前成员。
+- 右侧栏在任务进展与消息详情之间切换；展开的任务卡按任务ID保留，任务进展每8秒刷新且只在任务标签可见时轮询。
 - 评论用稳定ID保持侧栏选择，工具按运行ID/消息ID保持展开状态；更新时尽量保留滚动锚点。
 - 展开的通信详情占用真实flex布局空间；760px及以下切换至全宽详情，关闭返回会话。
 

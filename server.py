@@ -21,6 +21,7 @@ from urllib.parse import urlparse, parse_qs
 from urllib.parse import quote
 from datetime import datetime, timezone
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 
 HERE = Path(__file__).resolve().parent
 
@@ -33,6 +34,12 @@ HERMES_DB = Path(os.environ.get("HERMES_STATE_DB", Path.home() / ".hermes" / "st
 
 # 这些状态算"在办"，发消息时优先挂到这种任务上
 OPEN_STATES = ("in_progress", "in_review", "todo", "blocked")
+
+# 任务进展面板：排序、最近完成数量、参与任务扫描窗口
+TASK_ORDER = {"in_progress": 0, "blocked": 1, "in_review": 2, "todo": 3, "backlog": 4}
+TASK_RECENT_DONE = 4
+TASK_PARTICIPATION_WINDOW = 12
+CHECKBOX_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[([ xX])\][ \t]+(.+?)[ \t]*$", re.M)
 
 
 def api_key():
@@ -390,6 +397,217 @@ def public_text(value, limit=16000):
     return {"text": text[:limit], "truncated": len(text) > limit}
 
 
+# ---------------------------------------------------------------- 任务进展
+
+def checklist_progress(description, truncated=False):
+    """任务描述里的 Markdown 勾选项；代码块中的示例不算进展。"""
+    text = re.sub(r"```[\s\S]*?```", "", description or "")
+    items = []
+    for match in CHECKBOX_RE.finditer(text):
+        items.append({
+            "done": bool(match.group(1).strip()),
+            "text": public_text(match.group(2).strip(), 200)["text"],
+        })
+    if not items:
+        return None
+    return {
+        "done": sum(1 for item in items if item["done"]),
+        "total": len(items),
+        "items": items[:12],
+        "more": max(0, len(items) - 12),
+        "partial": bool(truncated),
+    }
+
+
+def task_run_index():
+    """把最近 200 次运行按任务分组；只统计当前公司。"""
+    runs = cached("task-runs", 4.0, fetch_runs)
+    index = {}
+    for run in runs:
+        if run.get("companyId") and run["companyId"] != COMPANY:
+            continue
+        context = run.get("contextSnapshot") or {}
+        issue_id = context.get("issueId") or context.get("taskId")
+        if issue_id:
+            index.setdefault(issue_id, []).append(run)
+    return index, len(runs)
+
+
+def task_run_stats(runs):
+    if not runs:
+        return {"total": 0, "succeeded": 0, "failed": 0, "active": 0,
+                "lastStatus": None, "lastAt": None, "lastError": ""}
+
+    def when(run):
+        return run.get("finishedAt") or run.get("startedAt") or run.get("createdAt") or ""
+
+    ordered = sorted(runs, key=when, reverse=True)
+    last = ordered[0]
+    last_status = last.get("status")
+    return {
+        "total": len(runs),
+        "succeeded": sum(1 for run in runs if run.get("status") == "succeeded"),
+        "failed": sum(1 for run in runs if run.get("status") in ("failed", "timed_out")),
+        "active": sum(1 for run in runs if run.get("status") in ("running", "queued")),
+        "lastStatus": last_status,
+        "lastAt": when(last) or None,
+        "lastError": public_text(last.get("error") or "", 600)["text"]
+        if last_status in ("failed", "timed_out") else "",
+    }
+
+
+def comment_author_name(comment, directory):
+    agent_id = comment.get("authorAgentId") or comment.get("derivedAuthorAgentId")
+    if agent_id:
+        return directory.get(agent_id.casefold(), {}).get("name") or "未知成员"
+    if comment.get("authorUserId") or comment.get("onBehalfOfUserId"):
+        return "用户"
+    return "系统"
+
+
+def task_comments(issue_id, directory):
+    comments = [c for c in fetch_comments(issue_id) if not c.get("deletedAt")]
+    comments.sort(key=lambda c: c.get("createdAt") or "")
+    latest = []
+    for comment in comments[-3:]:
+        preview = public_text(comment.get("body") or "", 400)
+        latest.append({
+            "id": comment.get("id"),
+            "author": comment_author_name(comment, directory),
+            "ts": comment.get("createdAt"),
+            "text": preview["text"],
+            "truncated": preview["truncated"],
+        })
+    return {"total": len(comments), "latest": latest}
+
+
+def prefetch_comments(issue_ids):
+    """任务面板要读多条评论；并发预取，避免首屏逐个等待。"""
+    ids = [issue_id for issue_id in dict.fromkeys(issue_ids) if issue_id]
+    if not ids:
+        return
+    with ThreadPoolExecutor(max_workers=min(8, len(ids))) as pool:
+        list(pool.map(fetch_comments, ids))
+
+
+def participated_issues(agent_id, candidates, directory):
+    """最近其他任务中，当前成员写过评论或被首行点名的那部分。"""
+    found = []
+    for issue in candidates:
+        relation = None
+        for comment in fetch_comments(issue.get("id")):
+            if comment.get("deletedAt"):
+                continue
+            author = comment.get("authorAgentId") or comment.get("derivedAuthorAgentId")
+            if author == agent_id:
+                relation = "authored"
+                break
+            recipients = comment_event(comment, issue, agent_id, directory)["recipients"]
+            if any(r.get("kind") == "agent" and r.get("id") == agent_id for r in recipients):
+                relation = "addressed"
+                break
+        if relation:
+            found.append((issue, relation))
+    return found
+
+
+def task_progress(issue, relation, issues_by_id, children_by_parent, run_index, directory):
+    issue_id = issue.get("id")
+    status = issue.get("status") or "todo"
+    parent = issues_by_id.get(issue.get("parentId")) if issue.get("parentId") else None
+    children = children_by_parent.get(issue_id, [])
+    return {
+        "id": issue_id,
+        "identifier": issue.get("identifier"),
+        "title": issue.get("title") or "",
+        "status": status,
+        "priority": issue.get("priority"),
+        "phase": {"backlog": 0, "todo": 0, "in_progress": 1,
+                  "in_review": 2, "done": 3}.get(status),
+        "relation": relation,
+        "createdAt": issue.get("createdAt"),
+        "updatedAt": issue.get("updatedAt"),
+        "lastActivityAt": issue.get("lastActivityAt") or issue.get("updatedAt") or issue.get("createdAt"),
+        "completedAt": issue.get("completedAt"),
+        "parent": None if not parent else {
+            "identifier": parent.get("identifier"),
+            "title": parent.get("title"),
+            "status": parent.get("status"),
+        },
+        "children": {
+            "total": len(children),
+            "done": sum(1 for child in children if child.get("status") == "done"),
+        },
+        "checklist": checklist_progress(issue.get("description") or "",
+                                        bool(issue.get("descriptionTruncated"))),
+        "runs": task_run_stats(run_index.get(issue_id, [])),
+        "comments": task_comments(issue_id, directory) if issue_id else {"total": 0, "latest": []},
+    }
+
+
+def agent_tasks(agent_id):
+    """名下未结/最近完成，加上最近窗口里参与或被点名的其他任务。"""
+    agents = cached("agents", 4.0, fetch_agents)
+    agent = next((a for a in agents if a.get("id") == agent_id), None)
+    if not agent:
+        return {"agentId": agent_id, "state": "unavailable", "tasks": [], "note": "成员不存在。"}
+
+    issues = fetch_issues()
+    directory = recipient_directory(agents)
+    assigned = [issue for issue in issues if issue.get("assigneeAgentId") == agent_id]
+    open_tasks = [issue for issue in assigned if issue.get("status") not in ("done", "cancelled")]
+    open_tasks.sort(key=lambda issue: issue.get("updatedAt") or "", reverse=True)
+    open_tasks.sort(key=lambda issue: TASK_ORDER.get(issue.get("status"), 9))
+    done_tasks = [issue for issue in assigned if issue.get("status") == "done"]
+    done_tasks.sort(key=lambda issue: issue.get("updatedAt") or "", reverse=True)
+    recent_done = done_tasks[:TASK_RECENT_DONE]
+
+    candidates = [issue for issue in issues if issue.get("assigneeAgentId") != agent_id]
+    candidates.sort(key=lambda issue: issue.get("updatedAt") or "", reverse=True)
+    candidates = candidates[:TASK_PARTICIPATION_WINDOW]
+    prefetch_comments([issue.get("id") for issue in open_tasks + recent_done + candidates])
+
+    shown = [(issue, "assigned") for issue in open_tasks + recent_done]
+    assigned_ids = {issue.get("id") for issue in assigned}
+    for issue, relation in participated_issues(agent_id, candidates, directory):
+        if issue.get("id") not in assigned_ids:
+            shown.append((issue, relation))
+
+    run_index, runs_fetched = task_run_index()
+    issues_by_id = {issue.get("id"): issue for issue in issues}
+    children = {}
+    for issue in issues:
+        if issue.get("parentId"):
+            children.setdefault(issue["parentId"], []).append(issue)
+
+    tasks = [task_progress(issue, relation, issues_by_id, children, run_index, directory)
+             for issue, relation in shown]
+    return {
+        "agentId": agent_id,
+        "agentName": agent.get("name"),
+        "state": "available",
+        "tasks": tasks,
+        "groups": {
+            "assigned": len(assigned),
+            "open": len(open_tasks),
+            "done": len(done_tasks),
+            "doneShown": len(recent_done),
+            "participated": len(shown) - len(open_tasks) - len(recent_done),
+        },
+        "counts": {"open": sum(1 for task in tasks
+                              if task["status"] not in ("done", "cancelled"))},
+        "scope": {
+            "issueLimit": 100,
+            "issuesFetched": len(issues),
+            "runLimit": 200,
+            "runsFetched": runs_fetched,
+            "recentDone": TASK_RECENT_DONE,
+            "participationWindow": TASK_PARTICIPATION_WINDOW,
+        },
+        "note": "仅含当前名下任务与最近其他任务中参与或被点名的任务；已完成任务只列最近 4 项，运行记录来自最近 200 次运行。",
+    }
+
+
 def decoded(value, fallback):
     try:
         return json.loads(value) if isinstance(value, str) else value if value is not None else fallback
@@ -550,6 +768,15 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/state":
             try:
                 return self._send(200, agent_snapshot())
+            except Exception as e:
+                return self._send(500, {"error": str(e)})
+
+        if p == "/api/tasks":
+            aid = (parse_qs(u.query).get("agent") or [""])[0]
+            if not re.fullmatch(r"[a-zA-Z0-9-]{1,80}", aid):
+                return self._send(400, {"error": "valid agent required"})
+            try:
+                return self._send(200, cached("tasks:" + aid, 4.0, lambda: agent_tasks(aid)))
             except Exception as e:
                 return self._send(500, {"error": str(e)})
 

@@ -149,6 +149,16 @@ section{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .room-status{font-size:11px;padding:3px 9px;border-radius:6px;background:var(--rail);color:var(--ink-2);white-space:nowrap}
 .room-status.running{background:#edf8f1;color:#237845}
 .room-status.error{background:#fff0ee;color:#b42318}
+.panel-toggle{
+  display:inline-flex;align-items:center;gap:6px;flex:none;
+  border:1px solid var(--line-2);border-radius:8px;background:#fff;
+  padding:5px 9px;font-size:11.5px;color:var(--ink-2);cursor:pointer;
+}
+.panel-toggle:hover{background:var(--rail)}
+.panel-toggle[aria-expanded="true"]{border-color:#e8b396;background:var(--accent-weak);color:var(--accent)}
+.panel-toggle .n{font-size:10px;font-weight:700;line-height:15px;padding:0 5px;border-radius:99px;background:var(--accent-weak);color:var(--accent)}
+.panel-toggle[aria-expanded="true"] .n{background:#fff}
+.pt-short{display:none}
 .task-context{display:flex;align-items:center;gap:10px;flex:none;padding:10px 32px;font-size:12px;background:#fcfcfd;border-bottom:1px solid var(--line)}
 .task-context .task-title{min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .task-context strong{font-size:11px;font-weight:650}
@@ -237,6 +247,64 @@ section{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .execution-warning{font-size:11px;color:#965312;background:#fff8ed;padding:8px 10px;border-radius:7px;margin:8px 0}
 .execution-run .md pre.code{max-width:100%}
 .issue-sep.other{opacity:.72}
+
+/* ---------------- 侧栏：任务进展 ---------------- */
+.message-panel .panel-head{padding:12px 14px;gap:8px}
+.panel-tabs{display:flex;gap:3px;padding:3px;border-radius:9px;background:#f1f3f6;min-width:0}
+.panel-tab{
+  border:0;background:transparent;border-radius:7px;padding:5px 9px;
+  font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer;
+  display:inline-flex;align-items:center;gap:5px;white-space:nowrap;
+}
+.panel-tab[aria-selected="true"]{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 2px #242b3610}
+.panel-tab:disabled{color:#b6bcc5;cursor:default}
+.panel-tab:disabled[aria-selected="true"]{background:transparent;box-shadow:none;font-weight:400}
+.message-panel .panel-close{width:32px;height:32px;font-size:20px}
+
+.task-list{display:flex;flex-direction:column;gap:8px;padding:12px}
+.task-group{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:8px 2px 0;font-size:11px;font-weight:600;color:var(--ink-2)}
+.task-group .n{font-size:10.5px;font-weight:400;color:var(--ink-3)}
+.task-card{border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;flex:none}
+.task-card[open]{border-color:var(--line-2);box-shadow:0 2px 6px #242b3608}
+.task-summary{list-style:none;display:flex;flex-direction:column;gap:6px;padding:11px 12px;cursor:pointer}
+.task-summary::-webkit-details-marker{display:none}
+.task-summary:hover{background:#fafbfc}
+.task-card[open] .task-summary{border-bottom:1px solid var(--line)}
+.task-top{display:flex;align-items:center;gap:6px;min-width:0}
+.task-id{font-size:11px;font-weight:700;color:#3c424b;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-prio{flex:none;font-size:9px;font-weight:700;line-height:15px;padding:0 5px;border-radius:4px;background:#f0f2f5;color:var(--ink-2)}
+.task-prio.critical{background:#fdecec;color:#b42318}
+.task-prio.high{background:#fff4e8;color:#b45309}
+.task-rel{flex:none;font-size:9px;font-weight:600;line-height:15px;padding:0 5px;border-radius:4px;background:#eef4fb;color:#3566a3}
+.task-age{margin-left:auto;flex:none;font-size:10.5px;color:var(--ink-3)}
+.task-title{font-size:12.5px;line-height:1.5;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.task-track{display:flex;gap:3px;align-items:center}
+.task-track i{height:4px;flex:1;border-radius:2px;background:#e9ecf0}
+.task-track i.on{background:var(--accent)}
+.task-track i.now{background:#e9b393}
+.task-track.done i.on,.task-track.done i.now{background:#86d3a4}
+.task-track.blocked i.on{background:repeating-linear-gradient(90deg,var(--err) 0 7px,#f0a9a2 7px 12px)}
+.task-meta{display:flex;flex-wrap:wrap;gap:2px 8px;font-size:10.5px;line-height:1.5;color:var(--ink-3)}
+.task-meta .bad{color:#b42318}
+.task-meta .ok{color:#277251}
+.task-last{font-size:10.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:1px dashed var(--line);padding-top:5px}
+.task-detail{display:flex;flex-direction:column;gap:8px;padding:10px 12px 12px;background:#fcfcfd}
+.task-sub{font-size:10.5px;font-weight:650;color:var(--ink-2)}
+.task-facts{font-size:10.5px;line-height:1.6;color:var(--ink-3)}
+.task-checks{display:flex;flex-direction:column;gap:3px}
+.task-check{display:flex;gap:6px;font-size:11.5px;line-height:1.5;color:var(--ink-2);overflow-wrap:anywhere}
+.task-check .mark{flex:none;color:var(--ink-3)}
+.task-check.done{color:var(--ink-3)}
+.task-check.done span:last-child{text-decoration:line-through}
+.task-comment{border-left:2px solid var(--line-2);padding-left:7px;display:flex;flex-direction:column;gap:2px}
+.task-comment .who{display:flex;align-items:baseline;gap:6px;font-size:10.5px;color:var(--ink-3)}
+.task-comment .who strong{color:var(--ink-2);font-weight:600}
+.task-comment .txt{font-size:11.5px;line-height:1.55;color:#4b5563;white-space:pre-wrap;overflow-wrap:anywhere;max-height:5.2em;overflow:hidden}
+.task-error{font-size:10.5px;line-height:1.5;color:#b42318;background:#fff0ee;border-radius:6px;padding:6px 8px;overflow-wrap:anywhere}
+.task-note{font-size:10.5px;line-height:1.5;color:var(--ink-3)}
+.task-scope{padding:2px;font-size:10px}
+.task-notice{margin:10px 12px 0;padding:7px 9px;border-radius:7px;background:#fff8ed;color:#965312;font-size:11px;display:flex;gap:6px;align-items:center;justify-content:space-between}
+.task-skeleton{padding:18px 14px;font-size:12px;color:var(--ink-3)}
 
 .empty{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -376,6 +444,7 @@ select.model{
   .room-head h2{font-size:15px}
   .room-head .meta{font-size:11px}
   .room-head .ava{display:none}
+  .room-status{display:none}
   .task-context{padding:8px 16px;gap:7px;font-size:11px}
   .task-context .task-caption{display:none}
   .stream{padding:6px 14px 18px}
@@ -395,6 +464,12 @@ select.model{
   .route-avatar .ava{width:26px;height:26px;font-size:9px;border-radius:8px}
   .room-body.detail-open .conversation{display:none}
   .message-panel{width:100%;border-left:0}
+  .message-panel .panel-head{padding:10px 12px}
+  .panel-toggle{padding:5px 8px;font-size:11px}
+  .pt-full{display:none}
+  .pt-short{display:inline}
+  .task-list{padding:10px}
+  .task-title{font-size:12px}
   .receipt-badge{font-size:9px;max-width:30%}
   .comm-title{font-size:11px}
   .comm-detail{padding:12px}
@@ -433,6 +508,9 @@ select.model{
         <h2 id="title">团队工作室</h2>
         <div class="meta" id="roommeta"></div>
       </div>
+      <button class="panel-toggle" id="paneltoggle" type="button" aria-expanded="false" aria-controls="sidepanel" aria-label="打开任务进展">
+        <span class="pt-full">任务进展</span><span class="pt-short">任务</span><span class="n" id="panelcount" hidden></span>
+      </button>
       <span class="room-status" id="roomstatus">等待连接</span>
     </div>
     <div class="task-context" id="taskcontext" hidden></div>
@@ -469,9 +547,21 @@ select.model{
       <div class="hint"><span>有在办任务时追加评论，否则新建任务。</span><span>Enter 发送 · Shift+Enter 换行</span></div>
     </div>
     </div>
-    <div class="message-panel" id="messagepanel" role="region" aria-labelledby="detailtitle" hidden>
-      <div class="panel-head"><h3 id="detailtitle">消息详情</h3><button type="button" class="panel-close" id="closedetail" aria-label="关闭消息详情">×</button></div>
-      <div class="panel-content" id="detailcontent" tabindex="0"></div>
+    <div class="message-panel" id="sidepanel" role="region" aria-label="任务进展与消息详情" hidden>
+      <div class="panel-head">
+        <div class="panel-tabs" role="tablist" aria-label="侧栏内容">
+          <button type="button" class="panel-tab" id="tab-tasks" role="tab" aria-selected="true" aria-controls="taskspane">任务进展</button>
+          <button type="button" class="panel-tab" id="tab-message" role="tab" aria-selected="false" aria-controls="detailpane" tabindex="-1" disabled>消息详情</button>
+        </div>
+        <button type="button" class="panel-close" id="closepanel" aria-label="关闭侧栏">×</button>
+      </div>
+      <div class="panel-content" id="taskspane" role="tabpanel" aria-labelledby="tab-tasks" tabindex="0">
+        <div class="task-notice" id="tasknotice" role="status" hidden></div>
+        <div class="task-list" id="tasklist"><div class="task-skeleton">正在读取任务进展…</div></div>
+      </div>
+      <div class="panel-content" id="detailpane" role="tabpanel" aria-labelledby="tab-message" tabindex="-1" hidden>
+        <div id="detailcontent"></div>
+      </div>
     </div>
     </div>
   </section>
@@ -499,6 +589,10 @@ const ROLES = {
 const STATUS = {todo:"待办", in_progress:"进行中", in_review:"待评审", blocked:"受阻", done:"已完成", cancelled:"已取消", backlog:"待排期"};
 const drafts = new Map(), sending = new Set(), modelSaving = new Map();
 let activeMessage = null, messageEvents = new Map(), detailSignature = null;
+let tasks = [], tasksLoaded = false, tasksRequest = null, tasksSequence = 0, tasksSignature = null;
+let tasksMeta = {groups:{open:0}, note:""}, tasksAt = 0;
+let panelOpen = false, panelTab = "tasks", panelInit = false;
+const taskOpen = new Set();
 let roomEvents = [], executionRuns = [], executionRequest = null, executionSequence = 0, executionLoaded = false;
 const toolExpanded = new Set(), moreLoading = new Set();
 let stateBusy = false, stateEpoch = 0, roomRequest = null, roomSequence = 0;
@@ -656,6 +750,10 @@ async function refreshState(){
     $("#agent-count").textContent = agents.length;
     if(!agents.some(a => a.id === selected)) selectAgent(agents[0].id);
     else { renderRail(); renderHead(); renderModel(); }
+    if(!panelInit){
+      panelInit = true;
+      if(window.matchMedia("(min-width: 961px)").matches) openPanel("tasks");
+    }
   }catch(e){
     $("#live").classList.add("offline");
     $("#livetext").textContent = "连接中断";
@@ -703,7 +801,8 @@ function renderHead(){
   const a = agents.find(x => x.id === selected);
   if(!a) return;
   $("#title").textContent = a.name;
-  $("#roommeta").textContent = `${ROLES[a.name]?.[0] || a.title || "团队成员"} · ${a.openCount || 0} 个未结任务`;
+  const stateText = a.running > 0 ? `${a.running} 个运行` : freshError(a) ? "最近异常" : "待命";
+  $("#roommeta").textContent = `${ROLES[a.name]?.[0] || a.title || "团队成员"} · 名下 ${a.openCount || 0} 个未结任务 · ${stateText}`;
   const status = $("#roomstatus");
   status.className = `room-status ${a.running > 0 ? "running" : freshError(a) ? "error" : ""}`;
   status.textContent = a.running > 0 ? `${a.running} 个运行 / 排队` : freshError(a) ? "最近运行异常" : "待命中";
@@ -718,7 +817,219 @@ function renderHead(){
   $("#recipient").textContent = `发送给 ${a.name}`;
   $("#input").placeholder = a.name === "PL" ? "描述目标、调整优先级，或问问团队进展…" : `给 ${a.name} 补充信息，或询问当前进展…`;
   updateComposer();
+  updateTaskBadge();
 }
+
+/* ---------- 右栏：任务进展 ---------- */
+const TASK_PRIORITY = {critical:["P0","critical"], high:["P1","high"], medium:["P2","medium"], low:["P3","low"]};
+
+function ageFrom(iso){
+  if(!iso) return null;
+  const t = new Date(iso).getTime();
+  if(isNaN(t)) return null;
+  return Math.max(0, Math.round((Date.now() - t) / 60000));
+}
+function taskOpenCount(){
+  if(tasksLoaded) return tasks.filter(t => !["done","cancelled"].includes(t.status)).length;
+  return agents.find(a => a.id === selected)?.openCount || 0;
+}
+function updateTaskBadge(){
+  const n = taskOpenCount(), badge = $("#panelcount");
+  badge.textContent = n > 0 ? String(n) : "";
+  badge.hidden = n <= 0;
+  $("#paneltoggle").setAttribute("aria-label", `${panelOpen ? "关闭" : "打开"}任务进展${n > 0 ? `，${n} 个未结相关任务` : ""}`);
+}
+
+function renderPanelTabs(){
+  const hasMessage = !!(activeMessage && messageEvents.has(activeMessage));
+  const tasksTab = $("#tab-tasks"), msgTab = $("#tab-message");
+  tasksTab.setAttribute("aria-selected", String(panelTab === "tasks"));
+  tasksTab.tabIndex = panelTab === "tasks" ? 0 : -1;
+  msgTab.setAttribute("aria-selected", String(panelTab === "message"));
+  msgTab.tabIndex = panelTab === "message" ? 0 : -1;
+  msgTab.disabled = !hasMessage;
+  $("#taskspane").hidden = panelTab !== "tasks";
+  $("#detailpane").hidden = panelTab !== "message";
+}
+function openPanel(tab = "tasks"){
+  const wasOpen = panelOpen;
+  if(tab === "message" && !(activeMessage && messageEvents.has(activeMessage))) tab = "tasks";
+  panelOpen = true;
+  panelTab = tab;
+  $("#sidepanel").hidden = false;
+  $("#roombody").classList.add("detail-open");
+  $("#paneltoggle").setAttribute("aria-expanded", "true");
+  renderPanelTabs();
+  updateTaskBadge();
+  if(tab === "message") renderDetail();
+  else if(!tasksLoaded || Date.now() - tasksAt > 15000) loadTasks(true);
+  if(!wasOpen) updateLatest();
+}
+function closePanel(restoreFocus = true){
+  if(!panelOpen) return;
+  preserveStreamLayout(()=>{
+    panelOpen = false;
+    activeMessage = null;
+    detailSignature = null;
+    $("#sidepanel").hidden = true;
+    $("#roombody").classList.remove("detail-open");
+    $("#paneltoggle").setAttribute("aria-expanded", "false");
+    renderPanelTabs();
+  });
+  syncActiveMessage();
+  updateTaskBadge();
+  if(restoreFocus) $("#paneltoggle").focus({preventScroll:true});
+}
+function setTab(tab){
+  if(tab === "message" && !(activeMessage && messageEvents.has(activeMessage))) return;
+  if(!panelOpen){ openPanel(tab); return; }
+  panelTab = tab;
+  renderPanelTabs();
+  if(tab === "message") renderDetail();
+  else if(!tasksLoaded || Date.now() - tasksAt > 15000) loadTasks(true);
+}
+
+async function loadTasks(force = false){
+  if(!selected){
+    $("#tasklist").innerHTML = '<div class="empty"><div class="big">·</div><strong>未选择成员</strong><span>连接团队成员后，这里会显示任务进展。</span></div>';
+    return;
+  }
+  if(tasksRequest && !force) return;
+  tasksRequest?.controller.abort();
+  const id = selected, sequence = ++tasksSequence, controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), 30000);
+  tasksRequest = {controller};
+  try{
+    const d = await requestJSON("/api/tasks?agent=" + encodeURIComponent(id), {signal:controller.signal});
+    if(id !== selected || sequence !== tasksSequence) return;
+    if(d.state !== "available" || !Array.isArray(d.tasks)) throw new Error(d.note || "任务进展格式异常");
+    tasks = d.tasks;
+    tasksMeta = {groups:d.groups || {open:0}, note:d.note || ""};
+    tasksLoaded = true; tasksAt = Date.now();
+    $("#tasknotice").hidden = true;
+    renderTasks();
+    updateTaskBadge();
+  }catch(e){
+    if(id !== selected || sequence !== tasksSequence) return;
+    const notice = $("#tasknotice");
+    notice.hidden = false;
+    notice.innerHTML = '<span>任务进展同步暂时中断，已保留当前记录。</span><button type="button" class="text-button" data-task-retry>重试</button>';
+    if(!tasksLoaded){
+      $("#tasklist").innerHTML = '<div class="empty"><div class="big">↻</div><strong>任务进展暂未加载</strong><span>可以重试，消息与执行记录不受影响。</span></div>';
+    }
+  }finally{
+    clearTimeout(timer);
+    if(sequence === tasksSequence) tasksRequest = null;
+  }
+}
+
+function taskTrack(t){
+  const labels = ["待办","进行中","待评审","完成"];
+  if(t.phase == null){
+    const filled = t.status === "blocked" ? '<i class="on"></i>' : "";
+    return `<div class="task-track ${esc(t.status)}" role="img" aria-label="${esc(STATUS[t.status] || t.status)}">${filled}</div>`;
+  }
+  const cells = [0,1,2,3].map(i => {
+    const on = i < t.phase || (t.status === "done" && i === 3);
+    const now = i === t.phase && t.status !== "done";
+    return `<i class="${on ? "on" : now ? "now" : ""}"></i>`;
+  }).join("");
+  return `<div class="task-track ${t.status === "done" ? "done" : ""}" role="img" aria-label="${esc(`进展：${labels[t.phase]}（${t.phase + 1}/4）`)}">${cells}</div>`;
+}
+
+function taskDetailHTML(t){
+  const facts = [];
+  if(t.relation === "authored") facts.push("你在该任务中发过言");
+  if(t.relation === "addressed") facts.push("该任务的消息点名了你");
+  if(t.parent) facts.push(`父任务 ${t.parent.identifier || ""}`);
+  if(t.children.total) facts.push(`子任务 ${t.children.done}/${t.children.total} 完成`);
+  if(t.completedAt) facts.push(`完成于 ${dayLabel(t.completedAt)} ${hhmm(t.completedAt)}`);
+  let html = '<div class="task-detail">';
+  if(facts.length) html += `<div class="task-facts">${facts.map(esc).join("<br>")}</div>`;
+  if(t.checklist){
+    html += `<div class="task-sub">检查项 ${t.checklist.done}/${t.checklist.total}${t.checklist.partial ? " · 描述已截断" : ""}</div>`;
+    html += `<div class="task-checks">${t.checklist.items.map(item => `<div class="task-check ${item.done ? "done" : ""}"><span class="mark" aria-hidden="true">${item.done ? "✓" : "○"}</span><span>${esc(item.text)}</span></div>`).join("")}</div>`;
+    if(t.checklist.more) html += `<div class="task-note">另有 ${t.checklist.more} 项检查项未展示。</div>`;
+  }
+  if(t.comments.latest.length){
+    html += '<div class="task-sub">最近讨论</div>';
+    for(const c of t.comments.latest.slice().reverse()){
+      html += `<div class="task-comment"><div class="who"><strong>${esc(c.author)}</strong><span>${esc(dayLabel(c.ts))} ${esc(hhmm(c.ts))}</span></div><div class="txt">${esc(c.text)}</div>${c.truncated ? '<div class="task-note">内容过长，已截断。</div>' : ""}</div>`;
+    }
+  }
+  if(t.runs.total){
+    const last = t.runs.lastStatus ? (RUN_STATUS[t.runs.lastStatus] || t.runs.lastStatus) : "状态未知";
+    html += `<div class="task-sub">运行</div><div class="task-note">最近 ${esc(last)}${t.runs.lastAt ? ` · ${esc(dayLabel(t.runs.lastAt))} ${esc(hhmm(t.runs.lastAt))}` : ""} · 共 ${t.runs.total} 次${t.runs.failed ? `，失败 ${t.runs.failed} 次` : ""}</div>`;
+    if(t.runs.lastError) html += `<div class="task-error">${esc(t.runs.lastError)}</div>`;
+  }
+  return html + "</div>";
+}
+
+function taskHTML(t){
+  const pr = TASK_PRIORITY[t.priority] || [];
+  const meta = [];
+  if(t.runs.total) meta.push(`${t.runs.total} 次运行${t.runs.failed ? ` · <span class="bad">${t.runs.failed} 失败</span>` : ""}${t.runs.active ? ' · <span class="ok">执行中</span>' : ""}`);
+  else meta.push("近期无运行记录");
+  if(t.checklist) meta.push(`检查项 ${t.checklist.done}/${t.checklist.total}`);
+  if(t.comments.total) meta.push(`${t.comments.total} 条讨论`);
+  if(t.children.total) meta.push(`子任务 ${t.children.done}/${t.children.total}`);
+  const latest = t.comments.latest[t.comments.latest.length - 1];
+  const lastLine = latest ? (latest.text.split("\n").find(line => line.trim()) || "").trim() : "";
+  return `<details class="task-card" data-task="${esc(t.id)}"${taskOpen.has(t.id) ? " open" : ""}>
+    <summary class="task-summary">
+      <span class="task-top">
+        <span class="task-id">${esc(t.identifier || "任务")}</span>
+        ${pr.length ? `<span class="task-prio ${pr[1]}">${pr[0]}</span>` : ""}
+        ${t.relation !== "assigned" ? `<span class="task-rel">${t.relation === "addressed" ? "点名" : "参与"}</span>` : ""}
+        ${statusChip(t.status)}
+        <span class="task-age">${esc(ageLabel(ageFrom(t.lastActivityAt)))}</span>
+      </span>
+      <span class="task-title">${esc(t.title)}</span>
+      ${taskTrack(t)}
+      <span class="task-meta">${meta.join(" · ")}</span>
+      ${lastLine ? `<span class="task-last">${esc(latest.author)} · ${esc(ageLabel(ageFrom(latest.ts)))}：${esc(lastLine)}</span>` : ""}
+    </summary>
+    ${taskDetailHTML(t)}
+  </details>`;
+}
+
+function renderTasks(){
+  const box = $("#tasklist");
+  const signature = JSON.stringify([tasks, tasksMeta.note, tasksMeta.groups, Math.floor(Date.now()/60000)]);
+  if(signature === tasksSignature) return;
+  const pane = $("#taskspane"), scroll = pane.scrollTop;
+  Array.from(box.querySelectorAll("details[open]")).forEach(el => taskOpen.add(el.dataset.task));
+  tasksSignature = signature;
+  if(!tasks.length){
+    box.innerHTML = '<div class="empty"><div class="big">✓</div><strong>暂无关联任务</strong><span>发给该成员的消息会新建任务，或追加到现有任务。</span></div>';
+    pane.scrollTop = scroll;
+    return;
+  }
+  const assigned = tasks.filter(t => t.relation === "assigned");
+  const open = assigned.filter(t => !["done","cancelled"].includes(t.status));
+  const done = assigned.filter(t => ["done","cancelled"].includes(t.status));
+  const involved = tasks.filter(t => t.relation !== "assigned");
+  let html = "";
+  if(open.length) html += `<div class="task-group"><span>名下未结</span><span class="n">${open.length}</span></div>` + open.map(taskHTML).join("");
+  if(involved.length) html += `<div class="task-group"><span>参与讨论</span><span class="n">${involved.length}</span></div>` + involved.map(taskHTML).join("");
+  if(done.length) html += `<div class="task-group"><span>最近完成</span><span class="n">共 ${tasksMeta.groups.done || done.length} 项</span></div>` + done.map(taskHTML).join("");
+  if(tasksMeta.note) html += `<div class="task-note task-scope">${esc(tasksMeta.note)}</div>`;
+  box.innerHTML = html;
+  pane.scrollTop = scroll;
+}
+
+$("#tasklist").addEventListener("toggle", e => {
+  const card = e.target.closest ? e.target.closest("details[data-task]") : null;
+  if(!card) return;
+  if(card.open) taskOpen.add(card.dataset.task); else taskOpen.delete(card.dataset.task);
+}, true);
+$("#taskspane").addEventListener("click", e => {
+  if(e.target.closest("[data-task-retry]")) loadTasks(true);
+});
+$("#paneltoggle").onclick = () => { if(panelOpen) closePanel(); else openPanel("tasks"); };
+$("#closepanel").onclick = () => closePanel();
+$("#tab-tasks").onclick = () => setTab("tasks");
+$("#tab-message").onclick = () => setTab("message");
 
 /* ---------- 模型 ---------- */
 function renderModel(){
@@ -765,8 +1076,13 @@ function selectAgent(id){
   if(selected) drafts.set(selected, $("#input").value);
   roomRequest?.controller.abort();
   executionRequest?.controller.abort(); executionRequest = null; executionSequence++;
+  tasksRequest?.controller.abort(); tasksRequest = null; tasksSequence++;
   roomEvents = []; executionRuns = []; executionLoaded = false;
+  tasks = []; tasksLoaded = false; tasksSignature = null; tasksAt = 0;
+  tasksMeta = {groups:{open:0}, note:""}; taskOpen.clear();
   $("#executionnotice").hidden = true;
+  $("#tasknotice").hidden = true;
+  $("#tasklist").innerHTML = '<div class="task-skeleton">正在读取任务进展…</div>';
   roomRequest = null; roomSequence++;
   selected = id;
   roomSignature = null;
@@ -776,6 +1092,7 @@ function selectAgent(id){
   $("#latest").hidden = true;
   $("#roomnotice").hidden = true;
   renderRail(); renderHead(); renderModel(); loadRoom(); loadExecution();
+  if(panelOpen) loadTasks();
 }
 
 /* ---------- 消息流 ---------- */
@@ -929,11 +1246,11 @@ function renderDetail(){
   const signature = JSON.stringify([activeMessage,ev,names]);
   if(signature === detailSignature) return;
   const same = $("#detailcontent").dataset.event === activeMessage;
-  const scroll = same ? $("#detailcontent").scrollTop : 0;
+  const scroll = same ? $("#detailpane").scrollTop : 0;
   const {from,to,title,evidence} = communication(ev), receipt = receiptView(ev);
   $("#detailcontent").innerHTML = `<article class="comm-detail"><div class="detail-route">${avatarRoute(ev)}</div><div class="comm-address">${esc(from)} → ${esc(to)}</div><div class="comm-topic">来源：${esc(ev.issue || "任务")} · ${esc(title)}</div><div class="comm-meta"><time datetime="${esc(ev.ts)}">${dayLabel(ev.ts)} ${hhmm(ev.ts)}</time><span>${esc(evidence)}</span></div><div class="receipt-panel">${receipt.detail}</div><div class="txt ${ev.sender?.kind === "user" || ev.user ? "" : "md"}">${ev.sender?.kind === "user" || ev.user ? esc(ev.text) : md(ev.text)}</div></article>`;
   $("#detailcontent").dataset.event = activeMessage;
-  $("#detailcontent").scrollTop = scroll;
+  $("#detailpane").scrollTop = scroll;
   detailSignature = signature;
 }
 function syncActiveMessage(){
@@ -945,16 +1262,21 @@ function syncActiveMessage(){
 }
 function closeDetail(restoreFocus = true){
   const key = activeMessage;
-  preserveStreamLayout(()=>{
-    activeMessage = null; detailSignature = null;
-    $("#messagepanel").hidden = true;
-    $("#roombody").classList.remove("detail-open");
-  });
+  activeMessage = null;
+  detailSignature = null;
+  if(panelTab === "message"){
+    panelTab = "tasks";
+    renderPanelTabs();
+    if(panelOpen && (!tasksLoaded || Date.now() - tasksAt > 15000)) loadTasks(true);
+  }
   syncActiveMessage();
   if(restoreFocus && key) Array.from($("#stream").querySelectorAll(".comm")).find(el=>el.dataset.event === key)?.querySelector("button").focus({preventScroll:true});
 }
-$("#closedetail").onclick = ()=>closeDetail();
-document.addEventListener("keydown",e=>{if(e.key === "Escape" && activeMessage){e.preventDefault();closeDetail();}});
+document.addEventListener("keydown",e=>{
+  if(e.key !== "Escape") return;
+  if(activeMessage){e.preventDefault();closeDetail();}
+  else if(panelOpen && panelTab === "tasks" && $("#sidepanel").contains(document.activeElement)){e.preventDefault();closePanel();}
+});
 $("#stream").addEventListener("click",e=>{
   const button = e.target.closest(".comm-summary");
   if(!button) return;
@@ -962,12 +1284,11 @@ $("#stream").addEventListener("click",e=>{
   if(activeMessage === key){closeDetail();return;}
   preserveStreamLayout(()=>{
     activeMessage = key;
-    $("#messagepanel").hidden = false;
-    $("#roombody").classList.add("detail-open");
+    openPanel("message");
     renderDetail();
   });
   syncActiveMessage();
-  $("#closedetail").focus({preventScroll:true});
+  $("#detailpane").focus({preventScroll:true});
 });
 
 const RUN_STATUS = {queued:"排队中",running:"已开始",succeeded:"运行成功",failed:"运行失败",timed_out:"运行超时",cancelled:"已取消",cancelling:"取消中"};
@@ -1038,7 +1359,7 @@ function renderEvents(events){
     const route = `${from} → ${to}`, topic = `${ev.issue || "任务"} · ${title}`;
     const direction = ["in", "out"].includes(ev.dir) ? ev.dir : "related";
     html += `<div class="comm ${direction} ${activeMessage===key ? "active" : ""}" data-event="${key}">
-      <button type="button" class="comm-summary" aria-controls="messagepanel" aria-expanded="${activeMessage===key}" aria-label="${esc(route + "：" + topic)}" title="${esc(route + " · " + topic)}">
+      <button type="button" class="comm-summary" aria-controls="sidepanel" aria-expanded="${activeMessage===key}" aria-label="${esc(route + "：" + topic)}" title="${esc(route + " · " + topic)}">
         <span class="comm-route">${avatarRoute(ev)}</span>
         <span class="comm-divider" aria-hidden="true">·</span><span class="comm-title">${esc(topic)}</span>
         <span class="receipt-badge ${receipt.tone}" title="${esc(receipt.label)}">${esc(receipt.label)}</span>
@@ -1098,7 +1419,7 @@ async function doSend(){
     });
     if(d.ok){
       drafts.delete(id);
-      if(selected === id){ input.value = ""; loadRoom(true); }
+      if(selected === id){ input.value = ""; loadRoom(true); if(panelOpen) loadTasks(true); }
       toast(`${name} · ${d.mode === "comment" ? "已追加到" : "已新建任务"} ${d.issue || ""}`);
       refreshState();
     } else toast("失败：" + (d.error || "未知"));
@@ -1111,7 +1432,8 @@ refreshState();
 setInterval(() => { if(!document.hidden) refreshState(); }, 5000);
 setInterval(() => { if(!document.hidden) loadRoom(); }, 8000);
 setInterval(() => { if(!document.hidden) loadExecution(); }, 8000);
-document.addEventListener("visibilitychange", () => { if(!document.hidden){ refreshState(); loadRoom(); loadExecution(); } });
+setInterval(() => { if(!document.hidden && panelOpen && panelTab === "tasks") loadTasks(); }, 8000);
+document.addEventListener("visibilitychange", () => { if(!document.hidden){ refreshState(); loadRoom(); loadExecution(); if(panelOpen && panelTab === "tasks") loadTasks(); } });
 </script>
 </body>
 </html>
