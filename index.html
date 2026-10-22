@@ -394,7 +394,7 @@ button.trace-label:hover{background:var(--accent-weak)}
 .trace-track{position:relative;min-width:0;background:repeating-linear-gradient(to right,transparent 0,transparent calc(20% - 1px),var(--line) calc(20% - 1px),var(--line) 20%)}
 .trace-tick{position:absolute;top:8px;white-space:nowrap;font-size:10px;transform:translateX(-50%)}
 .trace-row{border-bottom:1px solid var(--line);min-height:56px}
-.trace-bar{position:absolute;height:24px;min-width:4px;border:1px solid #a6c6e8;border-radius:4px;background:#e2edfa;color:#28598b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;padding:2px 5px;font-size:10px;cursor:pointer}
+.trace-bar{position:absolute;height:24px;min-width:8px;border:1px solid #a6c6e8;border-radius:4px;background:#e2edfa;color:#28598b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;padding:2px 3px;font-size:10px;cursor:pointer}
 .trace-bar.succeeded{background:#e1f2e7;border-color:#a0d3b0;color:#24633b}
 .trace-bar.failed,.trace-bar.timed_out{background:#fde5e2;border-color:#edafa7;color:#9f2f26}
 .trace-bar.running,.trace-bar.cancelling{background:repeating-linear-gradient(135deg,#fff0dc,#fff0dc 6px,#ffe1b9 6px,#ffe1b9 12px);border-color:#eda95a;color:#8b4b12}
@@ -1572,14 +1572,19 @@ function taskTraceHTML(items){
   if(intervals.length){
     const min = Math.min(...intervals.map(r=>r.start)), max = Math.max(...intervals.map(r=>r.end));
     const span = Math.max(max-min, 1000), start = min-span*.025, extent = span*1.05;
+    const trackWidth = Math.max(620, ($('#tasklist').clientWidth-2)*traceZoom)-150;
+    const minimumSpan = extent*10/Math.max(1,trackWidth);
     const percent = value => ((value-start)/extent*100).toFixed(5);
     const tracks = new Map();
     for(const item of intervals){
       const key = JSON.stringify([item.task.id, item.run.agentId]);
       if(!tracks.has(key)) tracks.set(key, {task:item.task, name:item.run.agentName, lanes:[]});
       const track = tracks.get(key);
-      // 同一成员的重叠运行也占独立子轨，不能相互盖住。
-      let lane = track.lanes.find(lane=>lane[lane.length-1].end < item.start);
+      // 同时避让真实区间和最小点击宽度，密集短运行也不能互相遮挡。
+      let lane = track.lanes.find(lane=>{
+        const last = lane[lane.length-1];
+        return Math.max(last.end,last.start+minimumSpan) < item.start;
+      });
       if(!lane){ lane=[]; track.lanes.push(lane); }
       lane.push(item);
     }
@@ -1835,7 +1840,10 @@ function updateLatest(){
 $("#stream").addEventListener("scroll", updateLatest, {passive:true});
 $("#latest").onclick = () => { $("#stream").scrollTop = $("#stream").scrollHeight; updateLatest(); };
 
-window.addEventListener("resize", () => { updateLatest(); updateChatLatest(); });
+window.addEventListener("resize", () => {
+  updateLatest(); updateChatLatest();
+  if(taskLayout === 'trace'){tasksSignature=null;renderTasks();}
+});
 
 function communication(ev){
   const sender = ev.sender || {name:names[ev.agent] || (ev.agent ? "未知成员" : ev.user ? "用户" : "系统")};

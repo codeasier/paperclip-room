@@ -77,6 +77,16 @@ const assert = require('node:assert/strict');
       }
     }
     assert.deepEqual(errors,[]);
+    await page.evaluate(()=>{
+      const task=tasks[0], start=Date.parse('2026-10-22T08:00:00Z');
+      const attempt=(id,offset,end)=>({id,agentId:'pl',agentName:'PL',status:'succeeded',startedAt:new Date(start+offset).toISOString(),finishedAt:new Date(start+end).toISOString()});
+      tasks=[{...task,attempts:[attempt('dense1',0,1000),attempt('dense2',1100,2000),attempt('far',86400000,86401000)]}];
+      setTaskLayout('trace');
+    });
+    for(const id of ['dense1','dense2']){
+      await page.locator(`[data-trace-run="${id}"]`).click();
+      assert.match(await page.locator('.trace-selected').innerText(),new RegExp(`运行：${id}`));
+    }
     console.log('PASS: true intervals, parallel lanes, queued point, escaping, detail, zoom, scroll retention, expanded state, search/status filters and 4 viewport widths');
   } finally { await browser.close(); }
 })().catch(error=>{console.error(error);process.exitCode=1;});
