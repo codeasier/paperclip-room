@@ -1,0 +1,27 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.db
+*.db-*
+*.sqlite*
+
+# Python and editor files
+__pycache__/
+*.py[cod]
+.venv/
+.DS_Store
+.idea/
+.vscode/
+
+# Deployment backups, logs and local evidence
+*.bak*
+*.before-*
+*.log
+*.pid
+*-preview.py
+screenshots/
+artifacts/
+.agent/

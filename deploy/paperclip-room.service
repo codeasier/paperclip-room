@@ -1,0 +1,15 @@
+[Unit]
+Description=Paperclip Room team console
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/paperclip-room
+EnvironmentFile=%h/Projects/paperclip-room/.env
+ExecStart=/usr/bin/env python3 server.py
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=default.target
