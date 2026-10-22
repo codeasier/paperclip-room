@@ -1440,6 +1440,7 @@ function taskDetailHTML(t){
   if(elapsed) facts.push(`窗口内累计执行 ${durationLabel(elapsed)}（并行运行分别计时）`);
   if(t.relation === "authored") facts.push("你在该任务中发过言");
   if(t.relation === "addressed") facts.push("该任务的消息点名了你");
+  if(t.relation === "executed") facts.push("你曾执行过该任务（当前查询窗口内）");
   if(t.parent) facts.push(`父任务 ${t.parent.identifier || ""}`);
   if(t.children.total) facts.push(`子任务 ${t.children.done}/${t.children.total} 完成`);
   if(t.completedAt) facts.push(`完成于 ${dayLabel(t.completedAt)} ${hhmm(t.completedAt)}`);
@@ -1467,12 +1468,13 @@ function taskDetailHTML(t){
 function renderTasks(){
   if(taskLayout !== 'trace') return;
   const box = $("#tasklist");
+  if(!tasksLoaded) return;
   const signature = JSON.stringify([tasks, tasksMeta.note, tasksMeta.groups, taskLayout, traceZoom, traceSelected, traceRange, traceOffset, $("#tasks-search").value, $("#tasks-filter").value, Math.floor(Date.now()/(tasks.some(t=>t.runs.active) ? 1000 : 60000))]);
   if(signature === tasksSignature) return;
   const pane = $("#taskspane"), scroll = pane.scrollTop;
   tasksSignature = signature;
   if(!tasks.length){
-    box.innerHTML = '<div class="empty"><div class="big">✓</div><strong>暂无关联任务</strong><span>对话不会自动建单；新建或成员创建的任务会显示在这里。</span></div>';
+    box.innerHTML = `<div class="empty"><div class="big">·</div><strong>当前查询范围暂无关联任务</strong><span>尚未查到该成员名下、参与讨论或执行过的任务。${esc(tasksMeta.note)}</span></div>`;
     pane.scrollTop = scroll;
     return;
   }

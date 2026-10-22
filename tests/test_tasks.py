@@ -30,12 +30,13 @@ class TaskProgressTests(unittest.TestCase):
     def setUp(self):
         server._CACHE.clear()
 
-    def load(self, issues, comments=None, runs=None, agent="pl"):
+    def load(self, issues, comments=None, runs=None, agent="pl", member_runs=None, member_available=True):
         comments = comments or {}
         runs = runs or []
         with patch.object(server, "fetch_agents", return_value=AGENTS), \
              patch.object(server, "fetch_issues", return_value=issues), \
              patch.object(server, "fetch_runs", return_value=runs), \
+             patch.object(server, "fetch_agent_runs", return_value={"available": member_available, "runs": member_runs or []}), \
              patch.object(server, "fetch_comments", side_effect=lambda iid: comments.get(iid, [])):
             return server.agent_tasks(agent)
 
@@ -186,6 +187,60 @@ class TaskProgressTests(unittest.TestCase):
         self.assertEqual(task["children"], {"total": 2, "done": 1})
         child = next(t for t in data["tasks"] if t["identifier"] == "HER-2")
         self.assertEqual(child["parent"]["identifier"], "HER-1")
+
+    def test_reassigned_tasks_outside_comment_window_remain_related_by_execution(self):
+        issues = [issue(f"new-{i}", f"HER-{i}", "todo", assignee="qa") for i in range(12)]
+        issues.extend([
+            issue("old", "HER-OLD", "blocked", assignee="qa", updated="2026-10-20T08:00:00Z"),
+            issue("cancelled", "HER-CANCELLED", "cancelled", assignee="qa", updated="2026-10-20T07:00:00Z"),
+        ])
+        own = [{"id": "old-run", "agentId": "pl", "companyId": server.COMPANY,
+                "status": "failed", "startedAt": "2026-10-20T06:00:00Z",
+                "finishedAt": "2026-10-20T06:01:00Z", "contextSnapshot": {"issueId": "old"}},
+               {"id": "cancelled-run", "agentId": "pl", "companyId": server.COMPANY,
+                "status": "cancelled", "createdAt": "2026-10-20T07:00:00Z",
+                "contextSnapshot": {"taskId": "cancelled"}}]
+        # The team window contains only other members' newer runs.
+        team = [{"id": "new-run", "agentId": "qa", "companyId": server.COMPANY,
+                 "contextSnapshot": {"issueId": "new-0"}}]
+        data = self.load(issues, runs=team, member_runs=own)
+        self.assertEqual({t["identifier"]: t["relation"] for t in data["tasks"]},
+                         {"HER-OLD": "executed", "HER-CANCELLED": "executed"})
+        self.assertEqual(data["groups"]["assigned"], 0)
+        self.assertEqual(data["groups"]["executed"], 2)
+        self.assertEqual(data["scope"]["memberRunsFetched"], 2)
+        self.assertEqual(data["tasks"][0]["attempts"][0]["startedAt"], own[0]["startedAt"])
+
+    def test_run_windows_deduplicate_and_preserve_existing_relation(self):
+        run = {"id": "same", "agentId": "pl", "companyId": server.COMPANY,
+               "status": "running", "contextSnapshot": {"issueId": "i1"}}
+        data = self.load([issue("i1", "HER-1", "in_progress")], runs=[run],
+                         member_runs=[{**run, "status": "succeeded"}])
+        self.assertEqual(len(data["tasks"]), 1)
+        task = data["tasks"][0]
+        self.assertEqual(task["relation"], "assigned")
+        self.assertEqual(task["runs"]["total"], 1)
+        self.assertEqual(task["attempts"][0]["status"], "succeeded")
+        self.assertEqual(data["groups"]["executed"], 0)
+
+    def test_execution_relation_excludes_other_members_companies_and_hidden_chats(self):
+        runs = [
+            {"id": "other", "agentId": "qa", "companyId": server.COMPANY,
+             "contextSnapshot": {"issueId": "i1"}},
+            {"id": "foreign", "agentId": "pl", "companyId": "foreign-company",
+             "contextSnapshot": {"issueId": "i1"}},
+            {"id": "chat", "agentId": "pl", "companyId": server.COMPANY,
+             "contextSnapshot": {"issueId": "hidden-chat"}},
+        ]
+        data = self.load([issue("i1", "HER-1", "todo", assignee="qa")], runs=runs)
+        self.assertEqual(data["tasks"], [])
+
+    def test_member_run_failure_keeps_known_tasks_and_reports_partial_scope(self):
+        data = self.load([issue("i1", "HER-1", "todo")], member_available=False)
+        self.assertEqual(data["state"], "available")
+        self.assertEqual(len(data["tasks"]), 1)
+        self.assertFalse(data["scope"]["memberRunsAvailable"])
+        self.assertIn("补查暂不可用", data["note"])
 
     def test_unknown_agent_is_explicit(self):
         data = self.load([], agent="missing")

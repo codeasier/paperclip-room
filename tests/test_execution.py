@@ -112,6 +112,28 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual([run['id'] for run in data['runs']], ['run-1'])
         self.assertEqual(data['runs'][0]['summary']['text'],'final')
 
+    def test_member_window_is_bounded_scoped_and_shared_by_both_views(self):
+        own = dict(self.run_meta, companyId='c1', contextSnapshot={'issueId':'i1'})
+        runs = [own, dict(own, id='foreign-company', companyId='c2'),
+                dict(own, id='foreign-agent', agentId='qa')]
+        runs.extend(dict(own, id=f'run-{i}') for i in range(25))
+        with patch.object(server, 'call', return_value=(200, {'runs':runs})) as api:
+            first = server.fetch_agent_runs('pl', 'c1')
+            self.assertTrue(first['available'])
+            self.assertEqual(len(first['runs']), 18)
+            self.assertTrue(all(r['companyId']=='c1' and r['agentId']=='pl' for r in first['runs']))
+            self.assertEqual(server.fetch_agent_runs('pl', 'c1'), first)
+            api.assert_called_once_with('GET', '/api/companies/c1/heartbeat-runs?agentId=pl&limit=20')
+            second = server.fetch_agent_runs('pl', 'c2')
+            self.assertEqual([r['id'] for r in second['runs']], ['foreign-company'])
+            self.assertEqual(api.call_count, 2)
+
+    def test_member_window_failure_is_not_reported_as_empty_history(self):
+        for response in [(503, {}), (200, {'unexpected':[]})]:
+            server._CACHE.clear()
+            with patch.object(server, 'call', return_value=response):
+                self.assertEqual(server.fetch_agent_runs('pl'), {'available':False, 'runs':[]})
+
 
 if __name__ == '__main__':
     unittest.main()

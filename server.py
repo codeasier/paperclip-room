@@ -40,6 +40,7 @@ OPEN_STATES = ("in_progress", "in_review", "todo", "blocked")
 TASK_ORDER = {"in_progress": 0, "blocked": 1, "in_review": 2, "todo": 3, "backlog": 4}
 TASK_RECENT_DONE = 4
 TASK_PARTICIPATION_WINDOW = 12
+MEMBER_RUN_LIMIT = 20
 TASK_PRIORITIES = ("low", "medium", "high", "critical")
 CHECKBOX_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[([ xX])\][ \t]+(.+?)[ \t]*$", re.M)
 
@@ -185,6 +186,21 @@ def fetch_runs(company=None):
     if st != 200:
         return []
     return as_list(data, "runs")
+
+
+def fetch_agent_runs(agent_id, company=None):
+    """成员自己的有界运行窗口，供记录列表和任务时间线共同使用。"""
+    company = company or COMPANY
+
+    def _load():
+        status, data = call("GET", f"/api/companies/{company}/heartbeat-runs?agentId={quote(agent_id, safe='')}&limit={MEMBER_RUN_LIMIT}")
+        if status != 200 or not (isinstance(data, list) or isinstance(data, dict) and isinstance(data.get("runs"), list)):
+            return {"available": False, "runs": []}
+        return {"available": True, "runs": [
+            run for run in as_list(data, "runs")[:MEMBER_RUN_LIMIT]
+            if run.get("agentId") == agent_id and run.get("companyId") == company
+        ]}
+    return cached("member-runs:" + company + ":" + agent_id, 4.0, _load)
 
 
 def fetch_comments(issue_id):
@@ -482,18 +498,24 @@ def checklist_progress(description, truncated=False):
     }
 
 
-def task_run_index(company=None):
-    """把最近 200 次运行按任务分组；只统计当前团队。"""
+def task_run_index(company=None, member_runs=()):
+    """团队最近 200 次与成员自己的运行窗口合并去重，按精确任务 ID 分组。"""
     company = company or COMPANY
     runs = cached("task-runs:" + company, 4.0, lambda: fetch_runs(company))
     index = {}
-    for run in runs:
+    seen = set()
+    for run in [*member_runs, *runs]:
         if run.get("companyId") and run["companyId"] != company:
+            continue
+        run_id = run.get("id")
+        if run_id and run_id in seen:
             continue
         context = run.get("contextSnapshot") or {}
         issue_id = context.get("issueId") or context.get("taskId")
         if issue_id:
             index.setdefault(issue_id, []).append(run)
+            if run_id:
+                seen.add(run_id)
     return index, len(runs)
 
 
@@ -619,7 +641,7 @@ def task_progress(issue, relation, issues_by_id, children_by_parent, run_index, 
 
 
 def agent_tasks(agent_id, company=None):
-    """名下未结/最近完成，加上最近窗口里参与或被点名的其他任务。"""
+    """名下未结/最近完成，加上有界窗口内参与讨论或实际执行过的任务。"""
     company = company or COMPANY
     agents = agents_for(company)
     agent = next((a for a in agents if a.get("id") == agent_id), None)
@@ -628,6 +650,10 @@ def agent_tasks(agent_id, company=None):
 
     issues = fetch_issues(company)
     directory = recipient_directory(agents)
+    member_window = fetch_agent_runs(agent_id, company)
+    run_index, runs_fetched = task_run_index(company, member_window["runs"])
+    executed = [issue for issue in issues if any(
+        run.get("agentId") == agent_id for run in run_index.get(issue.get("id"), []))]
     assigned = [issue for issue in issues if issue.get("assigneeAgentId") == agent_id]
     open_tasks = [issue for issue in assigned if issue.get("status") not in ("done", "cancelled")]
     open_tasks.sort(key=lambda issue: issue.get("updatedAt") or "", reverse=True)
@@ -639,7 +665,7 @@ def agent_tasks(agent_id, company=None):
     candidates = [issue for issue in issues if issue.get("assigneeAgentId") != agent_id]
     candidates.sort(key=lambda issue: issue.get("updatedAt") or "", reverse=True)
     candidates = candidates[:TASK_PARTICIPATION_WINDOW]
-    prefetch_comments([issue.get("id") for issue in open_tasks + recent_done + candidates])
+    prefetch_comments([issue.get("id") for issue in open_tasks + recent_done + candidates + executed])
 
     shown = [(issue, "assigned") for issue in open_tasks + recent_done]
     assigned_ids = {issue.get("id") for issue in assigned}
@@ -647,7 +673,9 @@ def agent_tasks(agent_id, company=None):
         if issue.get("id") not in assigned_ids:
             shown.append((issue, relation))
 
-    run_index, runs_fetched = task_run_index(company)
+    shown_ids = {issue.get("id") for issue, _ in shown}
+    executed_extra = [issue for issue in executed if issue.get("id") not in shown_ids]
+    shown.extend((issue, "executed") for issue in executed_extra)
     issues_by_id = {issue.get("id"): issue for issue in issues}
     children = {}
     for issue in issues:
@@ -667,6 +695,7 @@ def agent_tasks(agent_id, company=None):
             "done": len(done_tasks),
             "doneShown": len(recent_done),
             "participated": len(shown) - len(open_tasks) - len(recent_done),
+            "executed": len(executed_extra),
         },
         "counts": {"open": sum(1 for task in tasks
                               if task["status"] not in ("done", "cancelled"))},
@@ -675,10 +704,14 @@ def agent_tasks(agent_id, company=None):
             "issuesFetched": len(issues),
             "runLimit": 200,
             "runsFetched": runs_fetched,
+            "memberRunLimit": MEMBER_RUN_LIMIT,
+            "memberRunsFetched": len(member_window["runs"]),
+            "memberRunsAvailable": member_window["available"],
             "recentDone": TASK_RECENT_DONE,
             "participationWindow": TASK_PARTICIPATION_WINDOW,
         },
-        "note": "仅含当前名下任务与最近其他任务中参与或被点名的任务；已完成任务只列最近 4 项，运行记录来自最近 200 次运行。",
+        "note": "当前任务查询范围内，包含名下未结、最近 4 项已完成、近期讨论参与及实际执行过的任务；运行记录合并团队最近 200 次与该成员最近 20 次，非完整历史。"
+        + ("" if member_window["available"] else " 当前成员运行补查暂不可用，可能缺少较早执行记录。"),
     }
 
 
@@ -759,15 +792,13 @@ def execution_timeline(agent_id, company=None):
     company = company or COMPANY
     if not any(a.get("id") == agent_id for a in agents_for(company)):
         return {"agentId": agent_id, "state": "unavailable", "runs": [], "note": "成员不存在。"}
-    status, data = call("GET", f"/api/companies/{company}/heartbeat-runs?agentId={quote(agent_id, safe='')}&limit=20")
-    if status != 200 or not (isinstance(data, list) or isinstance(data, dict) and isinstance(data.get("runs"), list)):
+    window = fetch_agent_runs(agent_id, company)
+    if not window["available"]:
         return {"agentId": agent_id, "state": "unavailable", "runs": [], "note": "运行记录暂不可用。"}
     issues = fetch_issues(company)
     issue_ids = {issue.get("id") for issue in issues}
     runs = []
-    for run in as_list(data, "runs"):
-        if run.get("agentId") != agent_id or run.get("companyId") != company:
-            continue
+    for run in window["runs"]:
         context = run.get("contextSnapshot") or {}
         issue_id = context.get("issueId") or context.get("taskId")
         # 直接对话会话被 Paperclip 从普通任务列表隐藏；它的运行也不应混入任务时间线。

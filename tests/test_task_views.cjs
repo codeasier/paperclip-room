@@ -150,7 +150,29 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('.trace-bar').count(),0);
     await page.locator('[data-trace-window="next"]').click();
     assert.equal(await page.locator('[data-trace-run="far"]').count(),1);
+    // A member may have no current assignments/comments but still have historical executions.
+    const historicalTask=await page.evaluate(()=>({...tasks[0],id:'reassigned',identifier:'HER-7',title:'已转派的任务',relation:'executed',status:'blocked',
+      attempts:[{id:'analyst-run',agentId:'analyst',agentName:'Analyst',status:'failed',startedAt:'2026-10-20T08:00:00Z',finishedAt:'2026-10-20T08:05:00Z'}]}));
+    await page.route('**/api/tasks?**',route=>route.fulfill({json:{state:'available',tasks:[historicalTask],groups:{assigned:0,open:0,executed:1},note:'含实际执行过的任务；非完整历史。'}}));
+    await page.evaluate(()=>{
+      selected='analyst';names.analyst='Analyst';roomEvents=[];tasks=[];tasksLoaded=false;tasksSignature=null;traceRange='1h';traceOffset=0;
+      $('#tasklist').innerHTML='<div class="task-skeleton">正在读取任务进展…</div>';
+      executionRuns=[{id:'analyst-run',agentId:'analyst',issue:'HER-7',issueTitle:'已转派的任务',status:'failed',state:'available',ts:'2026-10-20T08:00:00Z',entries:[{id:'analyst-output',kind:'assistant',text:'需求分析的历史输出'}]}];
+      setTaskLayout('list');
+    });
+    assert.equal(await page.locator('[data-execution-detail="analyst-run"]').count(),1);
+    await page.locator('#tasks-trace-view').click();
+    await page.locator('[data-trace-run="analyst-run"]').waitFor();
+    assert.doesNotMatch(await page.locator('#tasklist').innerText(),/暂无关联任务/);
+    await page.locator('[data-trace-run="analyst-run"]').click();
+    assert.match(await page.locator('#detailcontent').innerText(),/需求分析的历史输出/);
+    assert.match(await page.locator('#detailcontent').innerText(),/曾执行过该任务/);
+    await page.locator('#closepanel').click();
+    await page.locator('#tasks-filter').selectOption('blocked');
+    assert.equal(await page.locator('[data-trace-run="analyst-run"]').count(),1);
+    await page.evaluate(()=>{tasks=[];tasksMeta.note='非完整历史';renderTasks();});
+    assert.match(await page.locator('#tasklist').innerText(),/当前查询范围暂无关联任务/);
     assert.deepEqual(errors,[]);
-    console.log('PASS: collapsed execution rows; sidebar tools/replies, history/pagination/dedup, live updates and scroll/expansion retention; central views, details, filters and 4 viewports');
+    console.log('PASS: historical executed/reassigned task hydration and scoped empty state; collapsed execution rows; sidebar tools/replies, history/pagination/dedup, live updates and scroll/expansion retention; central views, details, filters and 4 viewports');
   }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

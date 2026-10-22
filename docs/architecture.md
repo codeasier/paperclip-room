@@ -26,7 +26,7 @@ Python ThreadingHTTPServer (server.py)
 | GET | `/api/state?company=<id>` | 指定团队成员、当前任务、活跃运行与模型快照 |
 | GET | `/api/chat?company=<id>&agent=<id>` | 当前 board 用户与该成员的 Agent Chat 会话与消息 |
 | POST | `/api/chat?company=<id>` | JSON `{ "agentId": "…", "text": "…" }`；发送 Agent Chat 消息，必要时自动创建会话 |
-| GET | `/api/tasks?company=<id>&agent=<id>` | 成员名下未结/最近完成任务，以及最近参与或被点名的其他任务；含检查项、运行与讨论摘要 |
+| GET | `/api/tasks?company=<id>&agent=<id>` | 成员名下未结/最近完成、近期参与讨论及有界窗口内实际执行过的任务；含检查项、运行与讨论摘要 |
 | POST | `/api/tasks?company=<id>` | JSON `{ "agentId": "…", "title": "…", "description": "…", "priority": "…" }`；显式新建任务并指派 |
 | GET | `/api/room?company=<id>&agent=<id>` | 成员相关任务、评论与精确运行回执 |
 | GET | `/api/execution?company=<id>&agent=<id>` | 当前成员最近4次运行及最新过程页 |
@@ -76,11 +76,11 @@ Agent Chat 需要实例 Experimental 设置中的 `enableAgentChat` 已开启，
 - 团队列表来自 `GET /api/companies`，缓存30秒；只展示 active 公司，默认团队排首位。
 - 对话消息按 `order=asc` 读取全部 comments；长会话会随消息增长，当前没有做分页窗口。
 - 任务聚合查询带 `limit=100`，具体返回行为由上游版本决定。
-- 任务进展取最近100个任务：名下未结全部保留、已完成只列最近4项；参与讨论只扫描最近12个其他任务，不是全历史。
+- 任务进展取最近100个任务：名下未结全部保留、已完成默认列最近4项；参与讨论只扫描最近12个其他任务。另按精确任务ID纳入运行窗口中该成员实际执行过的任务（`relation=executed`），不因已转派、取消或超出评论扫描窗口而漏掉；不额外读取任务查询范围外的 issue，不是全历史。
 - 检查项只读取任务描述中的 Markdown 勾选行，忽略代码块；描述被平台截断时标注“描述已截断”，不推测剩余项。
-- 任务运行统计来自最近200次 heartbeat runs，按 `contextSnapshot` 的 `issueId` / `taskId` 精确归属；窗口内没有记录时显示“近期无运行记录”，不推断为从未运行。
+- 任务运行统计合并团队最近200次与当前成员最近20次 heartbeat runs，按运行ID去重，再按 `contextSnapshot` 的 `issueId` / `taskId` 精确归属；窗口内没有记录时不推断为从未运行。成员查询与 `/api/execution` 复用同一份4秒缓存，严格校验团队/成员；补查失败保留已知任务，以 `scope.memberRunsAvailable=false` 和 note 标明缺口。
 - `/api/tasks` 的 `attempts` 只返回运行 ID、执行成员、状态与原始创建/开始/结束时间，不携带会话或 resultJson。前端按任务与成员分轨、同轨重叠分层；只有有效开始+结束或有效开始+仍在执行的状态才绘制区间，其余有时间的记录绘制为时间点。累计执行为有效区间之和，并行区间分别计时；不以任务创建时间推算执行耗时。
-- 中央时间线进一步按当前 `selected` 成员精确过滤 `attempts.agentId`；默认使用其最近一次运行结束时间（仍在执行则为当前时间）定位一小时窗口。可选6/24小时或全部查询记录，前后翻页；跨窗口区间仅裁剪显示位置，详情仍保留原始时间与耗时。任务详情与参与讨论的后端查询范围不变。
+- 中央时间线进一步按当前 `selected` 成员精确过滤 `attempts.agentId`；默认使用其最近一次运行结束时间（仍在执行则为当前时间）定位一小时窗口。可选6/24小时或全部查询记录，前后翻页；跨窗口区间仅裁剪显示位置，详情仍保留原始时间与耗时。空状态限定为“当前查询范围”，加载中不提前判空。
 - 任务时间线只展示最近100个任务内的运行；Agent Chat 会话运行不属于任务，会被排除，避免在时间线上出现 UUID 标题的运行卡。
 - 评论时间线扫描最近6个名下任务与12个其他任务，输出最近160个事件，不是全历史。
 - 接收对象只依据评论首行明确指向；未指定对象的消息显示实际任务讨论区。
