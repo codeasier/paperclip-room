@@ -605,6 +605,15 @@ def task_progress(issue, relation, issues_by_id, children_by_parent, run_index, 
         "checklist": checklist_progress(issue.get("description") or "",
                                         bool(issue.get("descriptionTruncated"))),
         "runs": task_run_stats(run_index.get(issue_id, [])),
+        "attempts": [{
+            "id": run.get("id"),
+            "agentId": run.get("agentId"),
+            "agentName": directory.get((run.get("agentId") or "").casefold(), {}).get("name") or "未知成员",
+            "status": run.get("status"),
+            "createdAt": run.get("createdAt"),
+            "startedAt": run.get("startedAt"),
+            "finishedAt": run.get("finishedAt"),
+        } for run in run_index.get(issue_id, [])],
         "comments": task_comments(issue_id, directory) if issue_id else {"total": 0, "latest": []},
     }
 

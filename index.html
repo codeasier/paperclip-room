@@ -363,6 +363,49 @@ section{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .task-scope{padding:2px;font-size:10px}
 .task-notice{margin:10px 12px 0;padding:7px 9px;border-radius:7px;background:#fff8ed;color:#965312;font-size:11px;display:flex;gap:6px;align-items:center;justify-content:space-between}
 .task-skeleton{padding:18px 14px;font-size:12px;color:var(--ink-3)}
+.task-controls{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:#fff}
+.task-controls .view-tabs{margin-right:auto}
+.task-controls .view-tab[aria-pressed="true"]{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 2px #242b3610}
+.task-search{width:100%;min-width:0;border:1px solid var(--line-2);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--rail);color:var(--ink)}
+.task-filter{min-width:0;border:1px solid var(--line-2);border-radius:7px;padding:5px;font-size:11px;background:#fff;color:var(--ink-2)}
+.task-overview{display:flex;gap:12px;padding:2px 0 12px;font-size:11px;color:var(--ink-2);flex-wrap:wrap}
+.task-overview strong{font-size:16px;color:var(--ink);margin-right:3px;font-variant-numeric:tabular-nums}
+.task-card{border-radius:8px;box-shadow:none}
+.task-summary{gap:5px}
+.task-summary .task-track{height:3px;margin:3px 0}
+.task-summary .task-title{font-size:12px;line-height:1.55}
+.task-card[open]{border-color:#dfac8f}
+.task-card[open] .task-summary{background:#fffaf6}
+.task-top::after{content:'›';font-size:17px;line-height:16px;color:var(--ink-3)}
+.task-card[open] .task-top::after{transform:rotate(90deg)}
+.task-duration{font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.message-panel.trace-wide{width:clamp(340px,55%,780px)}
+.trace-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:11px;color:var(--ink-3)}
+.trace-tools button{padding:4px 8px;border:1px solid var(--line-2);border-radius:6px;background:white;cursor:pointer;font-size:11px}
+.trace-scroll{overflow:auto;max-width:100%;border:1px solid var(--line-2);border-radius:8px;background:#fff}
+.trace-canvas{min-width:620px;position:relative}
+.trace-axis,.trace-row{display:grid;grid-template-columns:150px minmax(0,1fr)}
+.trace-axis{position:sticky;top:0;z-index:3;background:var(--rail);height:35px;border-bottom:1px solid var(--line-2);font-size:10px;color:var(--ink-2)}
+.trace-label{position:sticky;left:0;z-index:2;background:#fff;border-right:1px solid var(--line-2);padding:8px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;text-align:left;color:var(--ink-2)}
+button.trace-label{border:0;border-right:1px solid var(--line-2);cursor:pointer;font:inherit;font-size:11px}
+button.trace-label:hover{background:var(--accent-weak)}
+.trace-label small{display:block;color:var(--ink-3);font-size:10px;overflow:hidden;text-overflow:ellipsis}
+.trace-axis .trace-label{background:var(--rail)}
+.trace-track{position:relative;min-width:0;background:repeating-linear-gradient(to right,transparent 0,transparent calc(20% - 1px),var(--line) calc(20% - 1px),var(--line) 20%)}
+.trace-tick{position:absolute;top:8px;white-space:nowrap;font-size:10px;transform:translateX(-50%)}
+.trace-row{border-bottom:1px solid var(--line);min-height:56px}
+.trace-bar{position:absolute;height:24px;min-width:4px;border:1px solid #a6c6e8;border-radius:4px;background:#e2edfa;color:#28598b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;padding:2px 5px;font-size:10px;cursor:pointer}
+.trace-bar.succeeded{background:#e1f2e7;border-color:#a0d3b0;color:#24633b}
+.trace-bar.failed,.trace-bar.timed_out{background:#fde5e2;border-color:#edafa7;color:#9f2f26}
+.trace-bar.running,.trace-bar.cancelling{background:repeating-linear-gradient(135deg,#fff0dc,#fff0dc 6px,#ffe1b9 6px,#ffe1b9 12px);border-color:#eda95a;color:#8b4b12}
+.trace-bar.queued{background:#f1f2f5;border:1px dashed #a2a9b4;color:#626c7b}
+.trace-bar.cancelled{background:#f1f2f5;border-color:#cbd0d7;color:#626c7b}
+.trace-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--ink-3);padding:10px 0}
+.trace-legend span::before{content:'';display:inline-block;width:7px;height:7px;border-radius:2px;background:var(--swatch);margin-right:4px}
+.trace-selected{margin-top:12px}
+.trace-selected .task-detail{border:1px solid var(--line);border-radius:8px}
+.trace-selected h4{font-size:12px;margin:8px 0}
+@media(max-width:760px){.message-panel.trace-wide{width:100%}.trace-axis,.trace-row{grid-template-columns:120px minmax(0,1fr)}}
 
 .empty{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -647,6 +690,14 @@ select.model{
         <button type="button" class="panel-close" id="closepanel" aria-label="关闭侧栏">×</button>
       </div>
       <div class="panel-content" id="taskspane" role="tabpanel" aria-labelledby="tab-tasks" tabindex="0">
+        <div class="task-controls">
+          <div class="view-tabs" role="group" aria-label="任务呈现方式">
+            <button type="button" class="view-tab" id="tasks-list-view" aria-pressed="true">列表</button>
+            <button type="button" class="view-tab" id="tasks-trace-view" aria-pressed="false">时间线</button>
+          </div>
+          <select class="task-filter" id="tasks-filter" aria-label="筛选任务状态"><option value="all">全部状态</option><option value="active">执行中</option><option value="blocked">受阻</option><option value="open">未完成</option><option value="done">已结束</option></select>
+          <input type="search" class="task-search" id="tasks-search" placeholder="搜索任务编号或标题…" aria-label="搜索任务编号或标题">
+        </div>
         <div class="task-notice" id="tasknotice" role="status" hidden></div>
         <div class="task-list" id="tasklist"><div class="task-skeleton">正在读取任务进展…</div></div>
       </div>
@@ -707,6 +758,7 @@ const drafts = new Map(), sending = new Set(), modelSaving = new Map();
 let activeMessage = null, messageEvents = new Map(), detailSignature = null;
 let tasks = [], tasksLoaded = false, tasksRequest = null, tasksSequence = 0, tasksSignature = null;
 let tasksMeta = {groups:{open:0}, note:""}, tasksAt = 0;
+let taskLayout = "list", traceZoom = 1, traceSelected = null;
 let chatMessages = [], chatInfo = null, chatState = "loading", chatRequest = null;
 let chatSequence = 0, chatSignature = null, chatEnabled = false, chatReplying = false, chatAt = 0;
 let view = "chat", taskSubmitting = false, taskReturnFocus = null;
@@ -935,6 +987,8 @@ function resetTeamView(){
   chatMessages = []; chatInfo = null; chatState = "loading"; chatSignature = null;
   chatEnabled = false; chatReplying = false; chatAt = 0;
   tasksMeta = {groups:{open:0}, note:""}; taskOpen.clear();
+  traceSelected = null; traceZoom = 1;
+  $('#tasks-search').value = ''; $('#tasks-filter').value = 'all';
   $("#executionnotice").hidden = true;
   $("#roomnotice").hidden = true;
   $("#tasknotice").hidden = true;
@@ -1418,7 +1472,8 @@ function taskHTML(t){
   if(t.runs.total) meta.push(`${t.runs.total} 次运行${t.runs.failed ? ` · <span class="bad">${t.runs.failed} 失败</span>` : ""}${t.runs.active ? ' · <span class="ok">执行中</span>' : ""}`);
   else meta.push("近期无运行记录");
   if(t.checklist) meta.push(`检查项 ${t.checklist.done}/${t.checklist.total}`);
-  if(t.comments.total) meta.push(`${t.comments.total} 条讨论`);
+  const elapsed = taskIntervals([t]).filter(r => r.measured).reduce((sum,r) => sum + r.end - r.start, 0);
+  if(elapsed) meta.push(`<span class="task-duration">累计执行 ${durationLabel(elapsed)}</span>`);
   if(t.children.total) meta.push(`子任务 ${t.children.done}/${t.children.total}`);
   const latest = t.comments.latest[t.comments.latest.length - 1];
   const lastLine = latest ? (latest.text.split("\n").find(line => line.trim()) || "").trim() : "";
@@ -1442,7 +1497,7 @@ function taskHTML(t){
 
 function renderTasks(){
   const box = $("#tasklist");
-  const signature = JSON.stringify([tasks, tasksMeta.note, tasksMeta.groups, Math.floor(Date.now()/60000)]);
+  const signature = JSON.stringify([tasks, tasksMeta.note, tasksMeta.groups, taskLayout, traceZoom, traceSelected, $("#tasks-search").value, $("#tasks-filter").value, Math.floor(Date.now()/(tasks.some(t=>t.runs.active) ? 1000 : 60000))]);
   if(signature === tasksSignature) return;
   const pane = $("#taskspane"), scroll = pane.scrollTop;
   Array.from(box.querySelectorAll("details[open]")).forEach(el => taskOpen.add(el.dataset.task));
@@ -1452,11 +1507,24 @@ function renderTasks(){
     pane.scrollTop = scroll;
     return;
   }
-  const assigned = tasks.filter(t => t.relation === "assigned");
+  const visible = filteredTasks();
+  if(!visible.length){
+    box.innerHTML = '<div class="empty"><strong>没有匹配的任务</strong><span>试试其他关键词或状态。</span></div>';
+    pane.scrollTop = scroll;
+    return;
+  }
+  if(taskLayout === "trace"){
+    const traceScroll = box.querySelector('.trace-scroll')?.scrollLeft || 0;
+    box.innerHTML = taskTraceHTML(visible);
+    box.querySelector('.trace-scroll')?.scrollTo({left:traceScroll});
+    pane.scrollTop = scroll;
+    return;
+  }
+  const assigned = visible.filter(t => t.relation === "assigned");
   const open = assigned.filter(t => !["done","cancelled"].includes(t.status));
   const done = assigned.filter(t => ["done","cancelled"].includes(t.status));
-  const involved = tasks.filter(t => t.relation !== "assigned");
-  let html = "";
+  const involved = visible.filter(t => t.relation !== "assigned");
+  let html = `<div class="task-overview"><span><strong>${visible.length}</strong>项任务</span><span><strong>${visible.filter(t=>t.runs.active).length}</strong>执行中</span><span><strong>${visible.filter(t=>t.status==='blocked').length}</strong>受阻</span></div>`;
   if(open.length) html += `<div class="task-group"><span>名下未结</span><span class="n">${open.length}</span></div>` + open.map(taskHTML).join("");
   if(involved.length) html += `<div class="task-group"><span>参与讨论</span><span class="n">${involved.length}</span></div>` + involved.map(taskHTML).join("");
   if(done.length) html += `<div class="task-group"><span>最近完成</span><span class="n">共 ${tasksMeta.groups.done || done.length} 项</span></div>` + done.map(taskHTML).join("");
@@ -1465,9 +1533,110 @@ function renderTasks(){
   pane.scrollTop = scroll;
 }
 
+function filteredTasks(){
+  const query = $("#tasks-search").value.trim().toLocaleLowerCase(), filter = $("#tasks-filter").value;
+  return tasks.filter(t => (!query || `${t.identifier || ''} ${t.title}`.toLocaleLowerCase().includes(query)) &&
+    (filter === 'all' || filter === 'active' && t.runs.active > 0 || filter === 'blocked' && t.status === 'blocked' ||
+     filter === 'open' && !['done','cancelled'].includes(t.status) || filter === 'done' && ['done','cancelled'].includes(t.status)));
+}
+function durationLabel(ms){
+  const seconds = Math.max(0, Math.floor(ms/1000));
+  if(seconds < 60) return `${seconds}秒`;
+  if(seconds < 3600) return `${Math.floor(seconds/60)}分${seconds%60}秒`;
+  return `${Math.floor(seconds/3600)}小时${Math.floor(seconds%3600/60)}分`;
+}
+function taskIntervals(items, now = Date.now()){
+  const intervals = [];
+  for(const task of items){
+    for(const run of task.attempts || []){
+      const started = Date.parse(run.startedAt), created = Date.parse(run.createdAt), finished = Date.parse(run.finishedAt);
+      const active = ['running','cancelling'].includes(run.status);
+      const start = Number.isFinite(started) ? started : created;
+      if(!Number.isFinite(start)) continue;
+      const measured = Number.isFinite(started) && (Number.isFinite(finished) && finished >= started || active && now >= started);
+      const end = measured ? (Number.isFinite(finished) ? finished : now) : start;
+      intervals.push({task, run, start, end, measured});
+    }
+  }
+  return intervals.sort((a,b) => a.start - b.start || String(a.run.id).localeCompare(String(b.run.id)));
+}
+function traceTime(ts){
+  if(!Number.isFinite(ts)) return '未记录';
+  const d = new Date(ts);
+  return `${d.getMonth()+1}/${d.getDate()} ${hhmm(d.toISOString())}:${String(d.getSeconds()).padStart(2,'0')}`;
+}
+function taskTraceHTML(items){
+  const intervals = taskIntervals(items);
+  const missing = items.filter(t=>!(t.attempts || []).some(r=>Number.isFinite(Date.parse(r.startedAt || r.createdAt))));
+  let html = `<div class="trace-tools"><span>任务 × 成员 · 真实运行区间</span><span class="grow"></span><button type="button" data-trace-zoom="out" aria-label="缩小时间线">−</button><span>${traceZoom}×</span><button type="button" data-trace-zoom="in" aria-label="放大时间线">＋</button><button type="button" data-trace-zoom="fit">适应</button></div>`;
+  if(intervals.length){
+    const min = Math.min(...intervals.map(r=>r.start)), max = Math.max(...intervals.map(r=>r.end));
+    const span = Math.max(max-min, 1000), start = min-span*.025, extent = span*1.05;
+    const percent = value => ((value-start)/extent*100).toFixed(5);
+    const tracks = new Map();
+    for(const item of intervals){
+      const key = JSON.stringify([item.task.id, item.run.agentId]);
+      if(!tracks.has(key)) tracks.set(key, {task:item.task, name:item.run.agentName, lanes:[]});
+      const track = tracks.get(key);
+      // 同一成员的重叠运行也占独立子轨，不能相互盖住。
+      let lane = track.lanes.find(lane=>lane[lane.length-1].end < item.start);
+      if(!lane){ lane=[]; track.lanes.push(lane); }
+      lane.push(item);
+    }
+    html += `<div class="trace-scroll" tabindex="0" aria-label="运行时间线，可横向滚动"><div class="trace-canvas" style="width:${traceZoom*100}%"><div class="trace-axis"><div class="trace-label">任务 / 执行成员</div><div class="trace-track">${[0,1,2,3,4].map(i=>`<span class="trace-tick" style="left:${10+i*20}%">${esc(traceTime(start+extent*(.1+i*.2)))}</span>`).join('')}</div></div>`;
+    for(const track of tracks.values()){
+      html += `<div class="trace-row" style="min-height:${Math.max(56,track.lanes.length*30+12)}px"><button type="button" class="trace-label" data-trace-task="${esc(track.task.id)}" title="${esc(track.task.title)}">${esc(track.task.identifier || '任务')}<small>${esc(track.name || '未知成员')}</small></button><div class="trace-track">`;
+      track.lanes.forEach((lane,index)=>{
+        for(const item of lane){
+          const r = item.run, status = RUN_STATUS[r.status] || '状态未知';
+          const time = item.measured ? durationLabel(item.end-item.start) : r.status==='queued' ? '排队时间点' : '区间未知';
+          const label = `${item.task.identifier || '任务'} · ${r.agentName || '未知成员'} · ${status} · ${traceTime(item.start)} · ${time} · ${r.id || ''}`;
+          html += `<button type="button" class="trace-bar ${esc(r.status)}" style="left:${percent(item.start)}%;width:${item.measured ? Math.max(0,(item.end-item.start)/extent*100).toFixed(5) : 0}%;top:${6+index*30}px" data-trace-task="${esc(item.task.id)}" data-trace-run="${esc(r.id || '')}" title="${esc(label)}" aria-label="${esc(label)}">${esc(status)} · ${esc(time)}</button>`;
+        }
+      });
+      html += '</div></div>';
+    }
+    html += '</div></div><div class="trace-legend"><span style="--swatch:#eda95a">执行中（至当前）</span><span style="--swatch:#a0d3b0">成功</span><span style="--swatch:#edafa7">失败 / 超时</span><span style="--swatch:#a2a9b4">排队 / 未知区间为时间点</span></div>';
+  } else html += '<div class="task-note">当前任务没有可绘制的运行时间，列表仍可查看任务进展。</div>';
+  if(missing.length) html += `<div class="task-group">无运行时间记录 · ${missing.length}</div>` + missing.map(taskHTML).join('');
+  const selectedTask = items.find(t=>t.id === traceSelected?.task);
+  if(selectedTask){
+    const attempt = (selectedTask.attempts || []).find(r=>r.id === traceSelected.run);
+    html += `<div class="trace-selected"><h4>${esc(selectedTask.identifier)} · ${esc(selectedTask.title)}</h4>${attempt ? `<div class="task-facts">${esc(attempt.agentName)} · ${esc(RUN_STATUS[attempt.status] || attempt.status)}<br>开始：${esc(attempt.startedAt ? traceTime(Date.parse(attempt.startedAt)) : '尚未开始 / 未记录')}<br>结束：${esc(attempt.finishedAt ? traceTime(Date.parse(attempt.finishedAt)) : ['running','cancelling'].includes(attempt.status) ? '执行中' : '未记录')}<br>运行：${esc(attempt.id)}</div>` : ''}${taskDetailHTML(selectedTask)}</div>`;
+  }
+  html += `<div class="task-note task-scope">点击轨道查看任务详情；横向重叠表示并行。仅含最近运行查询窗口，不代表完整历史；运行成功不等于任务验收完成。${esc(tasksMeta.note)}</div>`;
+  return html;
+}
+function setTaskLayout(layout){
+  taskLayout = layout;
+  $('#tasks-list-view').setAttribute('aria-pressed', String(layout==='list'));
+  $('#tasks-trace-view').setAttribute('aria-pressed', String(layout==='trace'));
+  preserveStreamLayout(()=>$('#sidepanel').classList.toggle('trace-wide', layout==='trace'));
+  renderTasks();
+}
+$('#tasks-list-view').onclick = () => setTaskLayout('list');
+$('#tasks-trace-view').onclick = () => setTaskLayout('trace');
+$('#tasks-search').oninput = () => renderTasks();
+$('#tasks-filter').onchange = () => renderTasks();
+$('#tasklist').addEventListener('click', e=>{
+  const zoom = e.target.closest('[data-trace-zoom]');
+  if(zoom){
+    traceZoom = zoom.dataset.traceZoom==='fit' ? 1 : Math.max(1,Math.min(8,traceZoom*(zoom.dataset.traceZoom==='in' ? 2 : .5)));
+    renderTasks();
+    return;
+  }
+  const target = e.target.closest('[data-trace-task]');
+  if(target){
+    traceSelected = {task:target.dataset.traceTask, run:target.dataset.traceRun};
+    renderTasks();
+    const detail = $('#tasklist .trace-selected');
+    if(detail){detail.tabIndex=-1;detail.focus({preventScroll:true});detail.scrollIntoView({block:'nearest'});}
+  }
+});
+
 $("#tasklist").addEventListener("toggle", e => {
   const card = e.target.closest ? e.target.closest("details[data-task]") : null;
-  if(!card) return;
+  if(!card || !card.isConnected) return;
   if(card.open) taskOpen.add(card.dataset.task); else taskOpen.delete(card.dataset.task);
 }, true);
 $("#taskspane").addEventListener("click", e => {
@@ -1531,6 +1700,8 @@ function selectAgent(id){
   chatMessages = []; chatInfo = null; chatState = "loading"; chatSignature = null;
   chatEnabled = false; chatReplying = false; chatAt = 0;
   tasksMeta = {groups:{open:0}, note:""}; taskOpen.clear();
+  traceSelected = null; traceZoom = 1;
+  $('#tasks-search').value = ''; $('#tasks-filter').value = 'all';
   $("#executionnotice").hidden = true;
   $("#tasknotice").hidden = true;
   $("#chatnotice").hidden = true;

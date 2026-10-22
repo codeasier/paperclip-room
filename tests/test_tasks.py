@@ -111,6 +111,32 @@ class TaskProgressTests(unittest.TestCase):
         self.assertNotIn("abcdefghijklmnopqrstuv", data["tasks"][0]["runs"]["lastError"])
         self.assertIn("已隐藏凭据", data["tasks"][0]["runs"]["lastError"])
 
+    def test_timeline_preserves_parallel_members_and_unknown_times(self):
+        runs = [
+            {"id": "r1", "agentId": "pl", "status": "succeeded",
+             "companyId": server.COMPANY, "contextSnapshot": {"issueId": "i1"},
+             "startedAt": "2026-10-22T07:00:00Z", "finishedAt": "2026-10-22T07:05:00Z",
+             "resultJson": {"private": "not exposed"}},
+            {"id": "r2", "agentId": "qa", "status": "running",
+             "companyId": server.COMPANY, "contextSnapshot": {"taskId": "i1"},
+             "startedAt": "2026-10-22T07:02:00Z"},
+            {"id": "r3", "agentId": "qa", "status": "queued",
+             "companyId": server.COMPANY, "contextSnapshot": {"issueId": "i1"},
+             "createdAt": "2026-10-22T07:03:00Z"},
+            {"id": "foreign", "agentId": "pl", "companyId": "other",
+             "contextSnapshot": {"issueId": "i1"}},
+            {"id": "unrelated", "agentId": "pl", "companyId": server.COMPANY,
+             "contextSnapshot": {"issueId": "i2"}},
+        ]
+        data = self.load([issue("i1", "HER-1", "in_progress")], runs=runs)
+        attempts = data["tasks"][0]["attempts"]
+        self.assertEqual([r["id"] for r in attempts], ["r1", "r2", "r3"])
+        self.assertEqual([r["agentName"] for r in attempts], ["PL", "QA", "QA"])
+        self.assertEqual(attempts[0]["startedAt"], runs[0]["startedAt"])
+        self.assertIsNone(attempts[1]["finishedAt"])
+        self.assertIsNone(attempts[2]["startedAt"])
+        self.assertNotIn("resultJson", attempts[0])
+
     def test_comments_exclude_deleted_and_deduplicate_authors(self):
         comments = {
             "i1": [
