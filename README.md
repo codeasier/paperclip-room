@@ -6,6 +6,7 @@
 
 ## 功能
 
+- 顶栏团队选择器：列出 token 可见的 Paperclip 公司（团队），切换后重新加载成员、任务与消息；选择保存在当前浏览器。
 - 成员列表、职责、当前任务、运行与错误状态；默认优先选择 PL。
 - 右侧任务进展：按成员列出名下未结、参与讨论与最近完成的任务，显示状态阶段、检查项、运行成败、最近讨论和子任务进度。
 - 中央展示实际助手回复、运行起止时间、最终结果；工具调用默认折叠，展开查看参数和返回结果。
@@ -22,7 +23,7 @@
 | --- | --- |
 | Python | 3.10 或以上，标准库即可 |
 | Paperclip | 已运行且可访问的实例，默认地址 `http://127.0.0.1:3100` |
-| 公司 ID | 要展示的 Paperclip company UUID |
+| 公司 ID | 默认展示的 Paperclip company UUID；页面可切换到其他可见团队 |
 | 授权密钥文件 | 一行有效 Bearer token，需具备对应公司读取权限；发送和改模型还需写入权限 |
 | Hermes 会话库（可选） | 默认 `~/.hermes/state.db`，完整过程读取仅支持本文描述的 Hermes 本地适配器 |
 
@@ -42,7 +43,7 @@ cp .env.example .env
 
 ### 2. 配置公司和密钥
 
-编辑 `.env`，至少填写真实的 `PAPERCLIP_COMPANY`。公司 ID 可从 Paperclip 页面/API 中已有的公司信息取得；本仓库不附带公司的数据或密钥。
+编辑 `.env`，至少填写真实的 `PAPERCLIP_COMPANY` 作为默认团队。公司 ID 可从 Paperclip 页面/API（`GET /api/companies`）中取得；本仓库不附带公司的数据或密钥。
 
 密钥默认从 `~/.paperclip/cli-automation.key` 读取。若你使用其他已授权的 token 文件，设置其路径：
 
@@ -74,7 +75,7 @@ python3 server.py
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `PAPERCLIP_COMPANY` | 无，必填 | 目标公司 ID |
+| `PAPERCLIP_COMPANY` | 无，必填 | 默认团队 ID；顶栏可切换到 token 可见的其他 active 团队 |
 | `PAPERCLIP_BASE` | `http://127.0.0.1:3100` | Paperclip 服务根地址，**不要加 `/api`** |
 | `PAPERCLIP_KEY_FILE` | `~/.paperclip/cli-automation.key` | Bearer token 文件 |
 | `HERMES_STATE_DB` | `~/.hermes/state.db` | Hermes SQLite 会话库，只读访问 |
@@ -90,6 +91,13 @@ python3 server.py
 控制台目前**没有独立登录或用户权限隔离**，访问者可使用后端 token 的权限下发任务和修改模型。默认只监听回环地址；需要远程访问时，请使用可信内网、SSH 隧道或带认证的反向代理，不应直接暴露到公网。
 
 ## 页面使用
+
+### 切换团队
+
+1. 顶栏团队下拉列出当前 token 可见的 active 公司；默认团队由 `PAPERCLIP_COMPANY` 决定，并排在最前。
+2. 切换后会重新加载该团队的成员、任务、消息与运行记录；已展开的消息详情会关闭，草稿不跨团队保留。
+3. 选择结果保存在浏览器 `localStorage`；刷新页面仍停留在该团队。团队被删除、归档或不可见时回落到默认团队。
+4. 团队暂无成员时页面显示空状态，不会当成连接失败；在 Paperclip 中添加成员后自动出现。
 
 ### 查看进展与过程
 
@@ -168,7 +176,7 @@ paperclip-room/
 └── docs/architecture.md         # 数据来源、接口、查询边界与维护说明
 ```
 
-角色顺序、职责、头像缩写和推荐模型在 `index.html` 的 `ROLES` / `MODELS` 中配置；收件人别名在 `server.py` 的 `ROLE_ALIASES` 中维护。现有页面以 PL、Analyst、Designer、Architect、Frontend、Backend、QA、DevOps 团队为预设；其他成员仍可显示，但自定义团队需按需调整这些映射和品牌文字。
+品牌名称、顶栏头像首字母和页面标题来自所选团队，不再硬编码。`ROLES` 只用于 Hermes 预设角色的中文短标签与排序；不在预设中的成员按 Paperclip `title` 显示，头像使用名称首字母。`MODELS` 是推荐模型列表，仍会合并成员当前模型；收件人别名在 `server.py` 的 `ROLE_ALIASES` 中维护。
 
 ## 常见问题
 
@@ -176,7 +184,8 @@ paperclip-room/
 | --- | --- |
 | 启动提示设置公司 ID | `.env` 是否真正导出到当前进程；值是否为真实 UUID |
 | 启动提示密钥文件无效 | `PAPERCLIP_KEY_FILE` 是否存在、可读且非空；文件中不要包含 `Bearer ` |
-| 页面连接中断或没有成员 | Paperclip 地址/端口、公司 ID、token 权限；使用 `journalctl` 或终端日志排查 |
+| 页面连接中断 | Paperclip 地址/端口、默认公司 ID、token 权限；使用 `journalctl` 或终端日志排查 |
+| 团队下拉为空或切换失败 | `/api/companies` 是否可读、token 是否有该公司权限；团队为空时会显示空状态而非连接错误 |
 | 有任务评论，但没有完整工具过程 | 控制台是否与 Hermes 同机，会话库路径/权限是否正确；其他适配器目前不读取其本地会话 |
 | 显示“尚未找到精确关联的会话记录” | 新运行尚未落库、身份标记/会话 ID 不匹配或记录已清理；不会用别人的会话补齐 |
 | 最终回复有，但中间过程缺失 | 可能只获得 Paperclip `resultJson` 兜底，或超出默认分页窗口；检查提示与更早过程按钮 |

@@ -108,22 +108,78 @@ def cached(key, ttl, fn):
     return val
 
 
-def fetch_agents():
-    st, data = call("GET", f"/api/companies/{COMPANY}/agents")
+def fetch_companies():
+    st, data = call("GET", "/api/companies")
+    return as_list(data, "companies") if st == 200 else []
+
+
+def company_list():
+    """当前 token 可见的公司（团队）。名称和状态变化不频繁，缓存30秒。"""
+    return cached("companies", 30.0, fetch_companies)
+
+
+def resolve_company(value):
+    """把请求里的团队参数收敛到可见公司；空值回落到服务端默认团队。"""
+    value = (value or "").strip()
+    if not value or value == COMPANY:
+        return COMPANY
+    return value if any(item.get("id") == value and item.get("status") in (None, "active")
+                        for item in company_list()) else None
+
+
+def teams_payload():
+    """顶栏团队选择器数据；默认团队排在最前，列表不可用时回落到环境默认。"""
+    teams = []
+    seen = set()
+    for item in company_list():
+        company_id = item.get("id")
+        if not company_id or company_id in seen:
+            continue
+        if item.get("status") and item["status"] != "active":
+            continue
+        seen.add(company_id)
+        teams.append({
+            "id": company_id,
+            "name": item.get("name") or "未命名团队",
+            "issuePrefix": item.get("issuePrefix"),
+            "description": item.get("description"),
+            "logoUrl": item.get("logoUrl"),
+        })
+    if not teams:
+        teams.append({"id": COMPANY, "name": "当前团队", "issuePrefix": None,
+                      "description": None, "logoUrl": None})
+    default = COMPANY if COMPANY in {item["id"] for item in teams} else teams[0]["id"]
+    for item in teams:
+        item["isDefault"] = item["id"] == default
+    teams.sort(key=lambda item: (0 if item["isDefault"] else 1,
+                                 (item.get("name") or "").casefold()))
+    return {"teams": teams, "default": default}
+
+
+def fetch_agents(company=None):
+    company = company or COMPANY
+    st, data = call("GET", f"/api/companies/{company}/agents")
     if st != 200:
         return []
     return as_list(data, "agents")
 
 
-def fetch_issues():
+def agents_for(company):
+    return cached("agents:" + company, 4.0, lambda: fetch_agents(company))
+
+
+def fetch_issues(company=None):
+    company = company or COMPANY
+
     def _load():
-        st, data = call("GET", f"/api/companies/{COMPANY}/issues?limit=100")
+        st, data = call("GET", f"/api/companies/{company}/issues?limit=100")
         return as_list(data, "issues") if st == 200 else []
-    return cached("issues", 4.0, _load)
+    return cached("issues:" + company, 4.0, _load)
 
 
-def fetch_runs():
-    st, data = call("GET", f"/api/companies/{COMPANY}/heartbeat-runs?limit=200")
+def fetch_runs(company=None):
+    company = company or COMPANY
+    st, data = call("GET", f"/api/companies/{company}/heartbeat-runs?limit=200")
     if st != 200:
         return []
     return as_list(data, "runs")
@@ -136,11 +192,12 @@ def fetch_comments(issue_id):
     return cached("c:" + issue_id, 20.0, _load)
 
 
-def agent_snapshot():
+def agent_snapshot(company=None):
     """左栏用：每个 agent 一行，带状态和当前任务。"""
-    agents = fetch_agents()
-    issues = fetch_issues()
-    runs = fetch_runs()
+    company = company or COMPANY
+    agents = agents_for(company)
+    issues = fetch_issues(company)
+    runs = fetch_runs(company)
 
     # 每个 agent 的活跃任务：优先 in_progress，其次 updatedAt 最新
     by_agent = {}
@@ -207,6 +264,7 @@ def agent_snapshot():
     return {
         "agents": out,
         "liveRuns": len(live),
+        "companyId": company,
         "serverTime": time.strftime("%H:%M:%S"),
     }
 
@@ -289,8 +347,9 @@ def comment_event(comment, issue, agent_id, directory):
     }
 
 
-def fetch_receipt_runs():
-    status, data = call("GET", f"/api/companies/{COMPANY}/heartbeat-runs?limit=200")
+def fetch_receipt_runs(company=None):
+    company = company or COMPANY
+    status, data = call("GET", f"/api/companies/{company}/heartbeat-runs?limit=200")
     if status != 200:
         return {"available": False, "runs": [], "limit": 200}
     if not isinstance(data, list) and not (
@@ -330,13 +389,14 @@ def attach_receipts(events, snapshot, directory):
         }
 
 
-def room_timeline(agent_id, limit_mine=6, limit_others=12):
+def room_timeline(agent_id, limit_mine=6, limit_others=12, company=None):
     """合并自己发出、首行明确发给自己、以及当前名下任务的讨论。
 
     接收方来自原文收件指令；无法确定时只展示实际发布的讨论区。
     """
-    all_issues = fetch_issues()
-    directory = recipient_directory(cached("agents", 4.0, fetch_agents))
+    company = company or COMPANY
+    all_issues = fetch_issues(company)
+    directory = recipient_directory(agents_for(company))
     mine = [i for i in all_issues if i.get("assigneeAgentId") == agent_id]
     others = [i for i in all_issues if i.get("assigneeAgentId") != agent_id]
 
@@ -379,7 +439,8 @@ def room_timeline(agent_id, limit_mine=6, limit_others=12):
 
     events.sort(key=lambda e: e.get("ts") or "")
     events = events[-160:]
-    attach_receipts(events, cached("receipt-runs", 4.0, fetch_receipt_runs), directory)
+    attach_receipts(events, cached("receipt-runs:" + company, 4.0,
+                                   lambda: fetch_receipt_runs(company)), directory)
     return {"agentId": agent_id, "events": events}
 
 
@@ -419,12 +480,13 @@ def checklist_progress(description, truncated=False):
     }
 
 
-def task_run_index():
-    """把最近 200 次运行按任务分组；只统计当前公司。"""
-    runs = cached("task-runs", 4.0, fetch_runs)
+def task_run_index(company=None):
+    """把最近 200 次运行按任务分组；只统计当前团队。"""
+    company = company or COMPANY
+    runs = cached("task-runs:" + company, 4.0, lambda: fetch_runs(company))
     index = {}
     for run in runs:
-        if run.get("companyId") and run["companyId"] != COMPANY:
+        if run.get("companyId") and run["companyId"] != company:
             continue
         context = run.get("contextSnapshot") or {}
         issue_id = context.get("issueId") or context.get("taskId")
@@ -545,14 +607,15 @@ def task_progress(issue, relation, issues_by_id, children_by_parent, run_index, 
     }
 
 
-def agent_tasks(agent_id):
+def agent_tasks(agent_id, company=None):
     """名下未结/最近完成，加上最近窗口里参与或被点名的其他任务。"""
-    agents = cached("agents", 4.0, fetch_agents)
+    company = company or COMPANY
+    agents = agents_for(company)
     agent = next((a for a in agents if a.get("id") == agent_id), None)
     if not agent:
         return {"agentId": agent_id, "state": "unavailable", "tasks": [], "note": "成员不存在。"}
 
-    issues = fetch_issues()
+    issues = fetch_issues(company)
     directory = recipient_directory(agents)
     assigned = [issue for issue in issues if issue.get("assigneeAgentId") == agent_id]
     open_tasks = [issue for issue in assigned if issue.get("status") not in ("done", "cancelled")]
@@ -573,7 +636,7 @@ def agent_tasks(agent_id):
         if issue.get("id") not in assigned_ids:
             shown.append((issue, relation))
 
-    run_index, runs_fetched = task_run_index()
+    run_index, runs_fetched = task_run_index(company)
     issues_by_id = {issue.get("id"): issue for issue in issues}
     children = {}
     for issue in issues:
@@ -622,12 +685,13 @@ def display_content(content):
     return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
 
 
-def session_transcript(run, before=0, page_size=60):
+def session_transcript(run, before=0, page_size=60, company=None):
     """Read-only Hermes messages, bounded by exact runtime identity and next wake boundary."""
     empty = {"entries": [], "nextCursor": None, "source": "hermes_session", "state": "unavailable"}
     if not HERMES_DB.is_file():
         return {**empty, "note": "Hermes 会话库不可用；仅展示平台运行结果。"}
-    markers = [f"- Run ID: {run['id']}", f"- Agent ID: {run['agentId']}", f"- Company ID: {COMPANY}"]
+    company = company or run.get("companyId") or COMPANY
+    markers = [f"- Run ID: {run['id']}", f"- Agent ID: {run['agentId']}", f"- Company ID: {company}"]
     try:
         with closing(sqlite3.connect(HERMES_DB.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)) as db:
             db.row_factory = sqlite3.Row
@@ -670,28 +734,31 @@ def session_transcript(run, before=0, page_size=60):
         return {**empty, "note": "会话库暂不可读，已保留平台运行结果，可稍后刷新。"}
 
 
-def execution_run(run, before=0):
+def execution_run(run, before=0, company=None):
+    company = company or run.get("companyId") or COMPANY
     context = run.get("contextSnapshot") or {}
     issue_id = context.get("issueId") or context.get("taskId")
-    issue = next((i for i in fetch_issues() if i.get("id") == issue_id), {})
+    issue = next((i for i in fetch_issues(company) if i.get("id") == issue_id), {})
     result = run.get("resultJson") or {}
     summary = (result.get("result") or result.get("summary") or "") if isinstance(result, dict) else ""
-    return {"id": run["id"], "agentId": run["agentId"], "status": run.get("status"), "ts": run.get("startedAt") or run.get("createdAt"), "finishedAt": run.get("finishedAt"), "issue": issue.get("identifier") or context.get("taskKey"), "issueTitle": issue.get("title") or "运行会话", "error": public_text(run.get("error") or "")["text"], "summary": public_text(summary), **session_transcript(run, before)}
+    return {"id": run["id"], "agentId": run["agentId"], "status": run.get("status"), "ts": run.get("startedAt") or run.get("createdAt"), "finishedAt": run.get("finishedAt"), "issue": issue.get("identifier") or context.get("taskKey"), "issueTitle": issue.get("title") or "运行会话", "error": public_text(run.get("error") or "")["text"], "summary": public_text(summary), **session_transcript(run, before, company=company)}
 
 
-def execution_timeline(agent_id):
-    if not any(a.get("id") == agent_id for a in cached("agents", 4, fetch_agents)):
+def execution_timeline(agent_id, company=None):
+    company = company or COMPANY
+    if not any(a.get("id") == agent_id for a in agents_for(company)):
         return {"agentId": agent_id, "state": "unavailable", "runs": [], "note": "成员不存在。"}
-    status, data = call("GET", f"/api/companies/{COMPANY}/heartbeat-runs?agentId={quote(agent_id, safe='')}&limit=4")
+    status, data = call("GET", f"/api/companies/{company}/heartbeat-runs?agentId={quote(agent_id, safe='')}&limit=4")
     if status != 200 or not (isinstance(data, list) or isinstance(data, dict) and isinstance(data.get("runs"), list)):
         return {"agentId": agent_id, "state": "unavailable", "runs": [], "note": "运行记录暂不可用。"}
-    runs = [r for r in as_list(data, "runs") if r.get("agentId") == agent_id and r.get("companyId") == COMPANY]
-    return {"agentId": agent_id, "state": "available", "runs": [execution_run(run) for run in runs[:4]], "note": "展示当前成员最近 4 次运行，按原始会话顺序展示公开输出。"}
+    runs = [r for r in as_list(data, "runs") if r.get("agentId") == agent_id and r.get("companyId") == company]
+    return {"agentId": agent_id, "state": "available", "runs": [execution_run(run, company=company) for run in runs[:4]], "note": "展示当前成员最近 4 次运行，按原始会话顺序展示公开输出。"}
 
 
-def send_message(agent_id, text):
+def send_message(agent_id, text, company=None):
     """有在办任务就追加评论（会唤醒 agent），否则新建任务派给它。"""
-    mine = [i for i in fetch_issues() if i.get("assigneeAgentId") == agent_id]
+    company = company or COMPANY
+    mine = [i for i in fetch_issues(company) if i.get("assigneeAgentId") == agent_id]
     mine.sort(key=lambda x: (x.get("status") != "in_progress", x.get("updatedAt") or ""), )
     target = None
     for it in mine:
@@ -705,7 +772,7 @@ def send_message(agent_id, text):
             return {"ok": True, "mode": "comment", "issue": target.get("identifier")}
         return {"ok": False, "error": f"评论失败 HTTP {st}"}
 
-    st, data = call("POST", f"/api/companies/{COMPANY}/issues", {
+    st, data = call("POST", f"/api/companies/{company}/issues", {
         "title": text.strip().splitlines()[0][:80],
         "description": text,
         "assigneeAgentId": agent_id,
@@ -758,53 +825,77 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _company(self, query, body=None):
+        raw = (body or {}).get("company") or (query.get("company") or [""])[0]
+        return resolve_company(raw)
+
     def do_GET(self):
         u = urlparse(self.path)
         p = u.path
+        query = parse_qs(u.query)
 
         if p in ("/", "/index.html"):
             return self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
 
-        if p == "/api/state":
+        if p == "/api/teams":
             try:
-                return self._send(200, agent_snapshot())
+                return self._send(200, teams_payload())
+            except Exception as e:
+                return self._send(500, {"error": str(e)})
+
+        if p == "/api/state":
+            company = self._company(query)
+            if not company:
+                return self._send(404, {"error": "team not found"})
+            try:
+                return self._send(200, agent_snapshot(company))
             except Exception as e:
                 return self._send(500, {"error": str(e)})
 
         if p == "/api/tasks":
-            aid = (parse_qs(u.query).get("agent") or [""])[0]
+            company = self._company(query)
+            if not company:
+                return self._send(404, {"error": "team not found"})
+            aid = (query.get("agent") or [""])[0]
             if not re.fullmatch(r"[a-zA-Z0-9-]{1,80}", aid):
                 return self._send(400, {"error": "valid agent required"})
             try:
-                return self._send(200, cached("tasks:" + aid, 4.0, lambda: agent_tasks(aid)))
+                return self._send(200, cached("tasks:" + company + ":" + aid, 4.0,
+                                               lambda: agent_tasks(aid, company)))
             except Exception as e:
                 return self._send(500, {"error": str(e)})
 
         if p == "/api/room":
-            aid = (parse_qs(u.query).get("agent") or [""])[0]
+            company = self._company(query)
+            if not company:
+                return self._send(404, {"error": "team not found"})
+            aid = (query.get("agent") or [""])[0]
             if not aid:
                 return self._send(400, {"error": "agent required"})
             try:
-                return self._send(200, room_timeline(aid))
+                return self._send(200, room_timeline(aid, company=company))
             except Exception as e:
                 return self._send(500, {"error": str(e)})
 
         if p in ("/api/execution", "/api/run"):
-            query = parse_qs(u.query)
+            company = self._company(query)
+            if not company:
+                return self._send(404, {"error": "team not found"})
             aid = (query.get("agent") or [""])[0]
             if not re.fullmatch(r"[a-zA-Z0-9-]{1,80}", aid):
                 return self._send(400, {"error": "valid agent required"})
             try:
                 if p == "/api/execution":
-                    return self._send(200, cached("exec:" + aid, 4, lambda: execution_timeline(aid)))
+                    return self._send(200, cached("exec:" + company + ":" + aid, 4,
+                                                  lambda: execution_timeline(aid, company)))
                 rid = (query.get("run") or [""])[0]
                 before = int((query.get("before") or ["0"])[0])
                 if not re.fullmatch(r"[0-9a-fA-F-]{36}", rid) or before < 0:
                     return self._send(400, {"error": "valid run and cursor required"})
                 status, run = call("GET", "/api/heartbeat-runs/" + rid)
-                if status != 200 or not isinstance(run, dict) or run.get("companyId") != COMPANY or run.get("agentId") != aid:
+                if status != 200 or not isinstance(run, dict) or run.get("companyId") != company or run.get("agentId") != aid:
                     return self._send(404, {"error": "run not found for this member"})
-                return self._send(200, execution_run(run, before))
+                return self._send(200, execution_run(run, before, company))
             except ValueError:
                 return self._send(400, {"error": "invalid cursor"})
             except Exception as e:
@@ -814,13 +905,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
+        query = parse_qs(u.query)
         body = self._json_body()
 
         if u.path == "/api/send":
+            company = self._company(query, body)
+            if not company:
+                return self._send(404, {"error": "team not found"})
             aid, text = body.get("agentId"), (body.get("text") or "").strip()
             if not aid or not text:
                 return self._send(400, {"error": "agentId and text required"})
-            return self._send(200, send_message(aid, text))
+            return self._send(200, send_message(aid, text, company))
 
         if u.path == "/api/model":
             aid, model = body.get("agentId"), (body.get("model") or "").strip()

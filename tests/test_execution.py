@@ -27,8 +27,8 @@ class ExecutionTests(unittest.TestCase):
         self.db.close()
         self.temp.cleanup()
 
-    def prompt(self, rid, agent='pl'):
-        return f'Paperclip runtime identity:\n- Run ID: {rid}\n- Agent ID: {agent}\n- Company ID: {server.COMPANY}'
+    def prompt(self, rid, agent='pl', company=None):
+        return f'Paperclip runtime identity:\n- Run ID: {rid}\n- Agent ID: {agent}\n- Company ID: {company or server.COMPANY}'
 
     def add(self, mid, role, text, calls=None, call_id=None, sid='session-1'):
         self.db.execute('INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)', (mid, sid, role, text, json.dumps(calls) if calls else None, call_id, 'terminal' if role=='tool' else None, 1792658920+mid, 'private-reasoning-never-display'))
@@ -93,6 +93,12 @@ class ExecutionTests(unittest.TestCase):
     def test_missing_db_explicit_fallback(self):
         with patch.object(server,'HERMES_DB',self.path.parent/'missing.db'):
             self.assertEqual(server.session_transcript(self.run_meta)['state'], 'unavailable')
+
+    def test_run_company_id_drives_session_marker(self):
+        self.add(5, 'user', self.prompt('run-x', company='other'))
+        run = {**self.run_meta, 'id': 'run-x', 'companyId': 'other'}
+        self.assertEqual(server.session_transcript(run)['state'], 'available')
+        self.assertEqual(server.session_transcript({**self.run_meta, 'id': 'run-y'})['state'], 'pending')
 
     def test_api_limits_runs_and_does_not_mix_members(self):
         runs = [dict(self.run_meta,companyId=server.COMPANY,resultJson={'result':'final'}),dict(self.run_meta,id='foreign',companyId=server.COMPANY,agentId='other')]

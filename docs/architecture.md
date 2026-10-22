@@ -22,15 +22,16 @@ Python ThreadingHTTPServer (server.py)
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/`、`/index.html` | 静态页面，按请求读盘 |
-| GET | `/api/state` | 公司成员、当前任务、活跃运行与模型快照 |
-| GET | `/api/tasks?agent=<id>` | 成员名下未结/最近完成任务，以及最近参与或被点名的其他任务；含检查项、运行与讨论摘要 |
-| GET | `/api/room?agent=<id>` | 成员相关任务、评论与精确运行回执 |
-| GET | `/api/execution?agent=<id>` | 当前成员最近4次运行及最新过程页 |
-| GET | `/api/run?agent=<id>&run=<uuid>&before=<cursor>` | 指定运行的更早过程页；校验公司与成员归属 |
-| POST | `/api/send` | JSON `{ "agentId": "…", "text": "…" }`；追加评论或新建任务 |
+| GET | `/api/teams` | 当前 token 可见的 active 团队（Paperclip 公司），含默认团队标记 |
+| GET | `/api/state?company=<id>` | 指定团队成员、当前任务、活跃运行与模型快照 |
+| GET | `/api/tasks?company=<id>&agent=<id>` | 成员名下未结/最近完成任务，以及最近参与或被点名的其他任务；含检查项、运行与讨论摘要 |
+| GET | `/api/room?company=<id>&agent=<id>` | 成员相关任务、评论与精确运行回执 |
+| GET | `/api/execution?company=<id>&agent=<id>` | 当前成员最近4次运行及最新过程页 |
+| GET | `/api/run?company=<id>&agent=<id>&run=<uuid>&before=<cursor>` | 指定运行的更早过程页；校验团队与成员归属 |
+| POST | `/api/send?company=<id>` | JSON `{ "agentId": "…", "text": "…" }`；追加评论或新建任务 |
 | POST | `/api/model` | JSON `{ "agentId": "…", "model": "…" }`；修改 adapterConfig.model |
 
-响应使用 JSON 和 `Cache-Control: no-store`。没有 SSE/WebSocket；状态5秒轮询，任务进展、评论和过程8秒轮询，标签页进入后台时暂停。环境配置在进程启动时读取。
+除 `/api/teams` 外，所有团队相关接口都接受 `company` 参数；省略时回落到 `PAPERCLIP_COMPANY`。服务端只接受当前 token 可见且 active 的公司 ID，缓存按公司隔离。响应使用 JSON 和 `Cache-Control: no-store`。没有 SSE/WebSocket；状态5秒轮询，任务进展、评论和过程8秒轮询，标签页进入后台时暂停。环境配置在进程启动时读取。
 
 ## Paperclip 接口依赖
 
@@ -56,6 +57,7 @@ Python ThreadingHTTPServer (server.py)
 
 ## 查询边界
 
+- 团队列表来自 `GET /api/companies`，缓存30秒；只展示 active 公司，默认团队排首位。
 - 任务聚合查询带 `limit=100`，具体返回行为由上游版本决定。
 - 任务进展取最近100个任务：名下未结全部保留、已完成只列最近4项；参与讨论只扫描最近12个其他任务，不是全历史。
 - 检查项只读取任务描述中的 Markdown 勾选行，忽略代码块；描述被平台截断时标注“描述已截断”，不推测剩余项。
@@ -68,7 +70,8 @@ Python ThreadingHTTPServer (server.py)
 
 ## 前端状态
 
-- 成员草稿保存在当前页面的Map中，不写localStorage，刷新丢失。
+- 成员草稿保存在当前页面的Map中，不写localStorage，刷新丢失；切换团队时清空。
+- 团队选择写入 `localStorage`（`room.team`），只影响浏览器视图，不修改 Paperclip。
 - 切成员时取消旧请求并校验请求序列，避免延迟响应覆盖当前成员。
 - 右侧栏在任务进展与消息详情之间切换；展开的任务卡按任务ID保留，任务进展每8秒刷新且只在任务标签可见时轮询。
 - 评论用稳定ID保持侧栏选择，工具按运行ID/消息ID保持展开状态；更新时尽量保留滚动锚点。

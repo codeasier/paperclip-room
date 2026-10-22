@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="theme-color" content="#ffffff" />
-<title>Hermes Lab · 团队工作室</title>
+<title>团队工作室</title>
 <style>
 :root{
   --bg:#ffffff;
@@ -56,7 +56,16 @@ header{
   display:flex;align-items:center;justify-content:center;
   color:#fff;font-size:16px;font-weight:750;
 }
-.brand h1{font-size:15px;margin:0;font-weight:700;letter-spacing:-.3px;white-space:nowrap}
+.team-picker{position:relative;display:inline-flex;align-items:center;min-width:0}
+.team-select{
+  -webkit-appearance:none;appearance:none;border:0;background:transparent;margin:0 -4px 0 0;
+  padding:3px 18px 3px 4px;border-radius:6px;cursor:pointer;
+  font:inherit;font-size:15px;font-weight:700;letter-spacing:-.3px;color:var(--ink);
+  max-width:min(46vw,260px);white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
+}
+.team-select:hover{background:var(--rail)}
+.team-select:disabled{color:var(--ink-2);cursor:default;background:transparent}
+.team-chevron{position:absolute;right:3px;width:12px;height:12px;color:var(--ink-3);pointer-events:none}
 .workspace-name{border-left:1px solid var(--line-2);padding-left:16px;margin-left:6px;color:var(--ink-2);font-size:12px}
 .sync-label{font-size:11px;color:var(--ink-3)}
 header .grow{flex:1}
@@ -84,6 +93,7 @@ aside{
   padding:0 12px 16px;
 }
 .rail-label .n{color:var(--ink-3);font-size:11px;font-weight:400}
+.rail-empty{padding:14px 12px;font-size:12px;color:var(--ink-3);text-align:center;border:1px dashed var(--line-2);border-radius:9px}
 .agent{
   display:flex;gap:9px;align-items:center;
   width:100%;text-align:left;border:1px solid transparent;background:transparent;
@@ -420,7 +430,7 @@ select.model{
 
 @media (max-width:760px){
   header{padding:0 16px;height:54px;gap:8px}
-  .brand h1{font-size:14px}
+  .team-select{font-size:14px;max-width:44vw}
   .brand .mark{width:28px;height:28px;font-size:14px;border-radius:9px}
   .workspace-name,.sync-label{display:none}
   .live{padding:3px 8px;font-size:11px}
@@ -486,8 +496,13 @@ select.model{
 <body>
 <header>
   <div class="brand">
-    <div class="mark">H</div>
-    <h1>Hermes Lab</h1>
+    <div class="mark" id="brandmark">·</div>
+    <label class="team-picker">
+      <select id="team" class="team-select" aria-label="选择团队" disabled>
+        <option value="">正在加载团队…</option>
+      </select>
+      <svg class="team-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
+    </label>
     <span class="workspace-name">团队工作室</span>
   </div>
   <div class="grow"></div>
@@ -499,7 +514,7 @@ select.model{
   <aside aria-label="团队成员">
     <div class="rail-label">团队成员 <span class="n" id="agent-count">—</span></div>
     <nav id="agents" class="agent-list" aria-label="选择智能体"></nav>
-    <div class="rail-foot">需求交给 PL，进展在这里查看。<br>8 个角色，一个工作室。</div>
+    <div class="rail-foot" id="railfoot">选择团队查看成员与任务进展。</div>
   </aside>
   <section aria-labelledby="title">
     <div class="room-head" id="roomhead">
@@ -581,6 +596,7 @@ const MODELS = [
 ];
 
 let agents = [], selected = null, names = {};
+let teams = [], teamId = "";
 const ROLES = {
   PL:["项目负责人","PL"], Analyst:["需求分析","AN"], Designer:["交互设计","UX"],
   Architect:["架构师","AR"], Frontend:["前端开发","FE"], Backend:["后端开发","BE"],
@@ -639,8 +655,12 @@ function toast(msg){
   clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove("show"), 2400);
 }
 
+function apiURL(url){
+  if(!teamId || !url.startsWith("/api/") || url.startsWith("/api/teams")) return url;
+  return url + (url.includes("?") ? "&" : "?") + "company=" + encodeURIComponent(teamId);
+}
 async function requestJSON(url, options = {}){
-  const response = await fetch(url, {...options, signal:options.signal || AbortSignal.timeout(30000)});
+  const response = await fetch(apiURL(url), {...options, signal:options.signal || AbortSignal.timeout(30000)});
   if(!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
 }
@@ -725,6 +745,113 @@ function md(src){
   return out.join("").replace(/\u0000(\d+)\u0000/g, (m, i) => codes[+i] || "");
 }
 
+/* ---------- 团队 ---------- */
+function teamDisplayName(){
+  const team = teams.find(t => t.id === teamId);
+  return (team && team.name) || "团队工作室";
+}
+function storedTeam(){
+  try{ return localStorage.getItem("room.team") || ""; }catch(e){ return ""; }
+}
+function rememberTeam(id){
+  try{ localStorage.setItem("room.team", id); }catch(e){}
+}
+function updateBrand(){
+  const name = teamDisplayName();
+  $("#brandmark").textContent = (name.trim()[0] || "·").toUpperCase();
+  $("#team").title = name;
+  document.title = `${name} · 团队工作室`;
+}
+function renderTeams(failed = false){
+  const select = $("#team");
+  select.innerHTML = teams.length
+    ? teams.map(t => `<option value="${esc(t.id)}">${esc(t.name || "未命名团队")}</option>`).join("")
+    : `<option value="">${failed ? "团队列表不可用" : "默认团队"}</option>`;
+  select.value = teamId || "";
+  select.disabled = !teams.length;
+}
+async function loadTeams(){
+  try{
+    const d = await requestJSON("/api/teams");
+    teams = Array.isArray(d.teams) ? d.teams : [];
+    const saved = storedTeam();
+    const preferred = teams.find(t => t.id === saved)
+      || teams.find(t => t.id === d.default)
+      || teams[0];
+    teamId = preferred ? preferred.id : "";
+    renderTeams();
+  }catch(e){
+    teams = []; teamId = ""; renderTeams(true);
+  }
+  updateBrand();
+}
+function renderEmptyTeam(){
+  const name = teamDisplayName();
+  $("#title").textContent = name;
+  $("#roommeta").textContent = "当前团队暂无成员";
+  const status = $("#roomstatus");
+  status.className = "room-status";
+  status.textContent = "待命";
+  status.title = "";
+  $("#roomhead .ava").outerHTML = avatar(name);
+  $("#taskcontext").hidden = true;
+  $("#latest").hidden = true;
+  $("#stream").innerHTML = `<div class="empty"><div class="big">·</div><strong>${esc(name)} 暂无成员</strong><span>在 Paperclip 中为这个团队添加成员后会自动出现。</span></div>`;
+  $("#stream").setAttribute("aria-busy", "false");
+  $("#recipient").textContent = "选择成员后发送消息";
+  $("#input").placeholder = "选择成员后发送消息…";
+  $("#model").innerHTML = "";
+  $("#model").disabled = true;
+  $("#model").dataset.signature = "";
+  $("#agents").innerHTML = '<div class="rail-empty">当前团队暂无成员</div>';
+  railSignature = $("#agents").innerHTML;
+  $("#tasklist").innerHTML = '<div class="empty"><div class="big">·</div><strong>当前团队暂无成员</strong><span>任务进展会在添加成员后显示。</span></div>';
+  updateComposer();
+  updateTaskBadge();
+}
+function resetTeamView(){
+  stateEpoch++; stateBusy = false;
+  roomRequest?.controller.abort(); roomRequest = null; roomSequence++;
+  executionRequest?.controller.abort(); executionRequest = null; executionSequence++;
+  tasksRequest?.controller.abort(); tasksRequest = null; tasksSequence++;
+  activeMessage = null; detailSignature = null; messageEvents.clear();
+  if(panelTab === "message"){ panelTab = "tasks"; renderPanelTabs(); }
+  syncActiveMessage();
+  selected = null; agents = []; names = {}; drafts.clear();
+  roomEvents = []; executionRuns = []; executionLoaded = false;
+  roomSignature = null; railSignature = "";
+  tasks = []; tasksLoaded = false; tasksSignature = null; tasksAt = 0;
+  tasksMeta = {groups:{open:0}, note:""}; taskOpen.clear();
+  $("#executionnotice").hidden = true;
+  $("#roomnotice").hidden = true;
+  $("#tasknotice").hidden = true;
+  $("#stream").innerHTML = '<div class="empty"><div class="big">···</div><strong>正在切换团队</strong><span>获取成员与任务记录…</span></div>';
+  $("#agents").innerHTML = '<div class="rail-empty">正在加载…</div>';
+  $("#tasklist").innerHTML = '<div class="task-skeleton">正在读取任务进展…</div>';
+  $("#agent-count").textContent = "—";
+  $("#taskcontext").hidden = true;
+  $("#model").innerHTML = ""; $("#model").disabled = true;
+  $("#input").value = ""; updateComposer();
+  $("#recipient").textContent = "选择成员后发送消息";
+  $("#input").placeholder = "选择成员后发送消息…";
+  $("#title").textContent = teamDisplayName();
+  $("#roommeta").textContent = "正在切换团队…";
+  $("#roomstatus").className = "room-status";
+  $("#roomstatus").textContent = "连接中";
+  $("#roomhead .ava").outerHTML = avatar(teamDisplayName());
+  $("#live").classList.remove("offline");
+  $("#livetext").textContent = "正在切换";
+  refreshState();
+}
+function switchTeam(id){
+  if(!id || id === teamId) return;
+  teamId = id;
+  rememberTeam(id);
+  updateBrand();
+  resetTeamView();
+}
+$("#team").onchange = e => switchTeam(e.target.value);
+
 /* ---------- 状态 ---------- */
 async function refreshState(){
   if(stateBusy) return;
@@ -733,12 +860,13 @@ async function refreshState(){
   try{
     const d = await requestJSON("/api/state");
     if(epoch !== stateEpoch) return;
-    if(!Array.isArray(d.agents) || !d.agents.length) throw new Error("未获取到团队成员");
+    if(!Array.isArray(d.agents)) throw new Error("未获取到团队成员");
     const order = Object.keys(ROLES);
     agents = d.agents.sort((a,b) => {
       const rank = a => order.includes(a.name) ? order.indexOf(a.name) : order.length;
       return rank(a) - rank(b);
     });
+    names = {};
     agents.forEach(a => names[a.id] = a.name);
     lastSync = new Date().toLocaleTimeString("zh-CN", {hour:"2-digit",minute:"2-digit"});
     $("#sync").textContent = `已同步 ${lastSync}`;
@@ -748,13 +876,19 @@ async function refreshState(){
     txt.textContent = d.liveRuns > 0 ? `${d.liveRuns} 个活跃运行` : "团队待命";
     live.title = "运行中与排队中的任务数";
     $("#agent-count").textContent = agents.length;
-    if(!agents.some(a => a.id === selected)) selectAgent(agents[0].id);
+    $("#railfoot").textContent = agents.length ? `${agents.length} 个成员 · 当前团队` : "当前团队暂无成员";
+    if(!agents.length){
+      selected = null;
+      renderEmptyTeam();
+    } else if(!agents.some(a => a.id === selected)) selectAgent(agents[0].id);
     else { renderRail(); renderHead(); renderModel(); }
+    updateBrand();
     if(!panelInit){
       panelInit = true;
       if(window.matchMedia("(min-width: 961px)").matches) openPanel("tasks");
     }
   }catch(e){
+    if(epoch !== stateEpoch) return;
     $("#live").classList.add("offline");
     $("#livetext").textContent = "连接中断";
     $("#sync").textContent = lastSync ? `上次同步 ${lastSync}` : "尚未同步";
@@ -764,11 +898,18 @@ async function refreshState(){
       $("#roomnotice").hidden = false;
       $("#roomerror").textContent = "未获取到团队状态。";
     }
-  }finally{ stateBusy = false; }
+  }finally{ if(epoch === stateEpoch) stateBusy = false; }
 }
 
 function renderRail(){
   const box = $("#agents");
+  if(!agents.length){
+    const empty = '<div class="rail-empty">当前团队暂无成员</div>';
+    if(empty === railSignature) return;
+    box.innerHTML = empty;
+    railSignature = empty;
+    return;
+  }
   const html = agents.map(a => {
     const dot = a.running > 0 ? "running" : (freshError(a) ? "error" : "idle");
     const tag = a.running > 0 ? `<span class="tag run">${a.running} 活跃</span>`
@@ -891,7 +1032,9 @@ function setTab(tab){
 
 async function loadTasks(force = false){
   if(!selected){
-    $("#tasklist").innerHTML = '<div class="empty"><div class="big">·</div><strong>未选择成员</strong><span>连接团队成员后，这里会显示任务进展。</span></div>';
+    $("#tasklist").innerHTML = agents.length
+      ? '<div class="empty"><div class="big">·</div><strong>未选择成员</strong><span>连接团队成员后，这里会显示任务进展。</span></div>'
+      : '<div class="empty"><div class="big">·</div><strong>当前团队暂无成员</strong><span>任务进展会在添加成员后显示。</span></div>';
     return;
   }
   if(tasksRequest && !force) return;
@@ -1428,12 +1571,26 @@ async function doSend(){
 }
 $("#send").onclick = doSend;
 
-refreshState();
-setInterval(() => { if(!document.hidden) refreshState(); }, 5000);
-setInterval(() => { if(!document.hidden) loadRoom(); }, 8000);
-setInterval(() => { if(!document.hidden) loadExecution(); }, 8000);
-setInterval(() => { if(!document.hidden && panelOpen && panelTab === "tasks") loadTasks(); }, 8000);
-document.addEventListener("visibilitychange", () => { if(!document.hidden){ refreshState(); loadRoom(); loadExecution(); if(panelOpen && panelTab === "tasks") loadTasks(); } });
+function startTimers(){
+  setInterval(() => { if(!document.hidden) refreshState(); }, 5000);
+  setInterval(() => { if(!document.hidden) loadRoom(); }, 8000);
+  setInterval(() => { if(!document.hidden) loadExecution(); }, 8000);
+  setInterval(() => { if(!document.hidden && panelOpen && panelTab === "tasks") loadTasks(); }, 8000);
+  document.addEventListener("visibilitychange", () => {
+    if(!document.hidden){
+      refreshState();
+      loadRoom();
+      loadExecution();
+      if(panelOpen && panelTab === "tasks") loadTasks();
+    }
+  });
+}
+async function boot(){
+  await loadTeams();
+  refreshState();
+  startTimers();
+}
+boot();
 </script>
 </body>
 </html>
