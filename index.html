@@ -250,8 +250,16 @@ section{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .issue-sep .ttl{color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
 .issue-sep .st{font-size:9.5px;padding:0 6px;border-radius:4px;background:#f4f5f7;color:var(--ink-3);flex:none;line-height:16px}
 
-/* 通信消息：默认只有居中的一行，明确发送者 → 接收者。 */
-.comm{width:fit-content;max-width:min(100%,760px);margin:10px auto;border:1px solid var(--line-2);border-radius:9px;background:#fafbfc;overflow:hidden}
+/* 所有任务记录共享同一行宽，类型图标区分任务、消息和执行。 */
+.comm{width:100%;max-width:100%;margin:10px 0;border:1px solid var(--line-2);border-radius:9px;background:#fafbfc;overflow:hidden}
+.event-icon{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;flex:none;border-radius:7px;background:#eef1f5;color:#657083}
+.event-icon svg{width:16px;height:16px}
+.event-icon.message{background:#edf4fe;color:#3566a3}
+.event-icon.execution{background:#fff0e3;color:#ad551c}
+#stream .issue-sep,#stream .comm,#stream .execution-run{width:100%;max-width:100%;margin:10px 0;border:1px solid var(--line-2);border-radius:9px}
+#stream .issue-sep{min-height:52px;padding:9px 13px;gap:10px}
+#stream .issue-sep.other{opacity:1}
+#stream .execution-run{padding:13px}
 .comm-summary{display:flex;width:100%;text-align:left;align-items:center;gap:10px;min-height:52px;padding:9px 13px;cursor:pointer;user-select:none;border:0;background:transparent}
 .comm-summary::-webkit-details-marker{display:none}
 .comm-summary:hover{background:#f1f4f8}
@@ -382,6 +390,7 @@ section{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .message-panel.trace-wide{width:clamp(340px,55%,780px)}
 .trace-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:11px;color:var(--ink-3)}
 .trace-tools button{padding:4px 8px;border:1px solid var(--line-2);border-radius:6px;background:white;cursor:pointer;font-size:11px}
+.trace-window{font-size:10.5px;color:var(--ink-2);line-height:1.6;margin:0 0 8px}
 .trace-scroll{overflow:auto;max-width:100%;border:1px solid var(--line-2);border-radius:8px;background:#fff}
 .trace-canvas{min-width:620px;position:relative}
 .trace-axis,.trace-row{display:grid;grid-template-columns:150px minmax(0,1fr)}
@@ -758,7 +767,7 @@ const drafts = new Map(), sending = new Set(), modelSaving = new Map();
 let activeMessage = null, messageEvents = new Map(), detailSignature = null;
 let tasks = [], tasksLoaded = false, tasksRequest = null, tasksSequence = 0, tasksSignature = null;
 let tasksMeta = {groups:{open:0}, note:""}, tasksAt = 0;
-let taskLayout = "list", traceZoom = 1, traceSelected = null;
+let taskLayout = "list", traceZoom = 1, traceSelected = null, traceRange = '1h', traceOffset = 0;
 let chatMessages = [], chatInfo = null, chatState = "loading", chatRequest = null;
 let chatSequence = 0, chatSignature = null, chatEnabled = false, chatReplying = false, chatAt = 0;
 let view = "chat", taskSubmitting = false, taskReturnFocus = null;
@@ -782,6 +791,15 @@ function avatar(name, cls=""){
   const h = hue(name);
   const initials = ROLES[name]?.[1] || (name || "?").slice(0,1).toUpperCase();
   return `<div class="ava ${cls}" aria-hidden="true" style="background:hsl(${h} 55% 94%);color:hsl(${h} 35% 35%)">${esc(initials)}</div>`;
+}
+function eventIcon(kind){
+  const icons = {
+    message:['消息','<path d="M5 5h14v10H9l-4 4V5Z"/><path d="M8 9h8M8 12h5"/>'],
+    execution:['实际执行','<rect x="4" y="4" width="16" height="16" rx="3"/><path d="m10 8 6 4-6 4V8Z"/>'],
+    task:['任务','<rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 3h6v4H9zM9 12h6M9 16h4"/>'],
+  };
+  const [label,paths] = icons[kind] || icons.task;
+  return `<span class="event-icon ${kind}" role="img" aria-label="${label}" title="${label}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg></span>`;
 }
 function ageLabel(min){
   if(min == null) return "";
@@ -987,7 +1005,7 @@ function resetTeamView(){
   chatMessages = []; chatInfo = null; chatState = "loading"; chatSignature = null;
   chatEnabled = false; chatReplying = false; chatAt = 0;
   tasksMeta = {groups:{open:0}, note:""}; taskOpen.clear();
-  traceSelected = null; traceZoom = 1;
+  traceSelected = null; traceZoom = 1; traceOffset = 0;
   $('#tasks-search').value = ''; $('#tasks-filter').value = 'all';
   $("#executionnotice").hidden = true;
   $("#roomnotice").hidden = true;
@@ -1497,7 +1515,7 @@ function taskHTML(t){
 
 function renderTasks(){
   const box = $("#tasklist");
-  const signature = JSON.stringify([tasks, tasksMeta.note, tasksMeta.groups, taskLayout, traceZoom, traceSelected, $("#tasks-search").value, $("#tasks-filter").value, Math.floor(Date.now()/(tasks.some(t=>t.runs.active) ? 1000 : 60000))]);
+  const signature = JSON.stringify([tasks, tasksMeta.note, tasksMeta.groups, taskLayout, traceZoom, traceSelected, traceRange, traceOffset, $("#tasks-search").value, $("#tasks-filter").value, Math.floor(Date.now()/(tasks.some(t=>t.runs.active) ? 1000 : 60000))]);
   if(signature === tasksSignature) return;
   const pane = $("#taskspane"), scroll = pane.scrollTop;
   Array.from(box.querySelectorAll("details[open]")).forEach(el => taskOpen.add(el.dataset.task));
@@ -1536,7 +1554,7 @@ function renderTasks(){
 function filteredTasks(){
   const query = $("#tasks-search").value.trim().toLocaleLowerCase(), filter = $("#tasks-filter").value;
   return tasks.filter(t => (!query || `${t.identifier || ''} ${t.title}`.toLocaleLowerCase().includes(query)) &&
-    (filter === 'all' || filter === 'active' && t.runs.active > 0 || filter === 'blocked' && t.status === 'blocked' ||
+    (filter === 'all' || filter === 'active' && (taskLayout === 'trace' ? (t.attempts || []).some(r=>r.agentId === selected && ['running','queued','cancelling'].includes(r.status)) : t.runs.active > 0) || filter === 'blocked' && t.status === 'blocked' ||
      filter === 'open' && !['done','cancelled'].includes(t.status) || filter === 'done' && ['done','cancelled'].includes(t.status)));
 }
 function durationLabel(ms){
@@ -1566,12 +1584,18 @@ function traceTime(ts){
   return `${d.getMonth()+1}/${d.getDate()} ${hhmm(d.toISOString())}:${String(d.getSeconds()).padStart(2,'0')}`;
 }
 function taskTraceHTML(items){
-  const intervals = taskIntervals(items);
-  const missing = items.filter(t=>!(t.attempts || []).some(r=>Number.isFinite(Date.parse(r.startedAt || r.createdAt))));
-  let html = `<div class="trace-tools"><span>任务 × 成员 · 真实运行区间</span><span class="grow"></span><button type="button" data-trace-zoom="out" aria-label="缩小时间线">−</button><span>${traceZoom}×</span><button type="button" data-trace-zoom="in" aria-label="放大时间线">＋</button><button type="button" data-trace-zoom="fit">适应</button></div>`;
+  const own = taskIntervals(items).filter(item=>item.run.agentId === selected);
+  const windowSize = {'1h':3600000,'6h':21600000,'24h':86400000}[traceRange];
+  const latest = own.length ? Math.max(...own.map(r=>r.end)) : Date.now();
+  const windowEnd = latest + (windowSize ? windowSize*.025 : 0) - (windowSize || 0)*traceOffset;
+  const windowStart = windowEnd - (windowSize || 0);
+  const intervals = own.filter(r=>!windowSize || r.end>=windowStart && r.start<=windowEnd);
+  const missingCount = items.filter(t=>!own.some(r=>r.task.id===t.id)).length;
+  let html = `<div class="trace-tools"><span>${esc(names[selected] || '当前成员')} · 执行时间线</span><span class="grow"></span><select class="task-filter" data-trace-range aria-label="时间线范围">${[['1h','最近活动 1 小时'],['6h','最近活动 6 小时'],['24h','最近活动 24 小时'],['all','全部记录']].map(([value,label])=>`<option value="${value}" ${traceRange===value?'selected':''}>${label}</option>`).join('')}</select><button type="button" data-trace-window="previous" aria-label="前一个时间窗口" ${!windowSize?'disabled':''}>←</button><button type="button" data-trace-window="next" aria-label="后一个时间窗口" ${!windowSize || !traceOffset?'disabled':''}>→</button><button type="button" data-trace-zoom="out" aria-label="缩小时间线">−</button><span>${traceZoom}×</span><button type="button" data-trace-zoom="in" aria-label="放大时间线">＋</button><button type="button" data-trace-zoom="fit">适应</button></div>`;
+  if(windowSize) html += `<div class="trace-window">${esc(traceTime(windowStart))} — ${esc(traceTime(windowEnd))} · ${intervals.length}/${own.length} 次运行${traceOffset ? '' : ' · 以最近运行定位'}</div>`;
   if(intervals.length){
     const min = Math.min(...intervals.map(r=>r.start)), max = Math.max(...intervals.map(r=>r.end));
-    const span = Math.max(max-min, 1000), start = min-span*.025, extent = span*1.05;
+    const span = Math.max(max-min, 60000), start = windowSize ? windowStart : min-span*.025, extent = windowSize || span*1.05;
     const trackWidth = Math.max(620, ($('#tasklist').clientWidth-2)*traceZoom)-150;
     const minimumSpan = extent*10/Math.max(1,trackWidth);
     const percent = value => ((value-start)/extent*100).toFixed(5);
@@ -1588,28 +1612,29 @@ function taskTraceHTML(items){
       if(!lane){ lane=[]; track.lanes.push(lane); }
       lane.push(item);
     }
-    html += `<div class="trace-scroll" tabindex="0" aria-label="运行时间线，可横向滚动"><div class="trace-canvas" style="width:${traceZoom*100}%"><div class="trace-axis"><div class="trace-label">任务 / 执行成员</div><div class="trace-track">${[0,1,2,3,4].map(i=>`<span class="trace-tick" style="left:${10+i*20}%">${esc(traceTime(start+extent*(.1+i*.2)))}</span>`).join('')}</div></div>`;
+    html += `<div class="trace-scroll" tabindex="0" aria-label="运行时间线，可横向滚动"><div class="trace-canvas" style="width:${traceZoom*100}%"><div class="trace-axis"><div class="trace-label">任务 / ${esc(names[selected] || '当前成员')}</div><div class="trace-track">${[0,1,2,3,4].map(i=>`<span class="trace-tick" style="left:${10+i*20}%">${esc(extent>=86400000 ? traceTime(start+extent*(.1+i*.2)).slice(0,-3) : hhmm(new Date(start+extent*(.1+i*.2)).toISOString()))}${extent<300000 ? ':'+String(new Date(start+extent*(.1+i*.2)).getSeconds()).padStart(2,'0') : ''}</span>`).join('')}</div></div>`;
     for(const track of tracks.values()){
-      html += `<div class="trace-row" style="min-height:${Math.max(56,track.lanes.length*30+12)}px"><button type="button" class="trace-label" data-trace-task="${esc(track.task.id)}" title="${esc(track.task.title)}">${esc(track.task.identifier || '任务')}<small>${esc(track.name || '未知成员')}</small></button><div class="trace-track">`;
+      html += `<div class="trace-row" style="min-height:${Math.max(56,track.lanes.length*30+12)}px"><button type="button" class="trace-label" data-trace-task="${esc(track.task.id)}" title="${esc(track.task.title)}">${esc(track.task.identifier || '任务')}<small>${esc(track.task.title)}</small></button><div class="trace-track">`;
       track.lanes.forEach((lane,index)=>{
         for(const item of lane){
           const r = item.run, status = RUN_STATUS[r.status] || '状态未知';
           const time = item.measured ? durationLabel(item.end-item.start) : r.status==='queued' ? '排队时间点' : '区间未知';
           const label = `${item.task.identifier || '任务'} · ${r.agentName || '未知成员'} · ${status} · ${traceTime(item.start)} · ${time} · ${r.id || ''}`;
-          html += `<button type="button" class="trace-bar ${esc(r.status)}" style="left:${percent(item.start)}%;width:${item.measured ? Math.max(0,(item.end-item.start)/extent*100).toFixed(5) : 0}%;top:${6+index*30}px" data-trace-task="${esc(item.task.id)}" data-trace-run="${esc(r.id || '')}" title="${esc(label)}" aria-label="${esc(label)}">${esc(status)} · ${esc(time)}</button>`;
+          const visibleStart = Math.max(start,item.start), visibleEnd = Math.min(start+extent,item.end);
+          html += `<button type="button" class="trace-bar ${esc(r.status)}" style="left:${percent(visibleStart)}%;width:${item.measured ? Math.max(0,(visibleEnd-visibleStart)/extent*100).toFixed(5) : 0}%;top:${6+index*30}px" data-trace-task="${esc(item.task.id)}" data-trace-run="${esc(r.id || '')}" title="${esc(label)}" aria-label="${esc(label)}">${esc(status)} · ${esc(time)}</button>`;
         }
       });
       html += '</div></div>';
     }
     html += '</div></div><div class="trace-legend"><span style="--swatch:#eda95a">执行中（至当前）</span><span style="--swatch:#a0d3b0">成功</span><span style="--swatch:#edafa7">失败 / 超时</span><span style="--swatch:#a2a9b4">排队 / 未知区间为时间点</span></div>';
-  } else html += '<div class="task-note">当前任务没有可绘制的运行时间，列表仍可查看任务进展。</div>';
-  if(missing.length) html += `<div class="task-group">无运行时间记录 · ${missing.length}</div>` + missing.map(taskHTML).join('');
+  } else html += '<div class="task-note">当前时间窗口没有该成员的运行，可切换时间范围或向前翻页。</div>';
+  if(missingCount) html += `<div class="task-note">${missingCount} 项任务未记录当前成员的执行时间，可在列表中查看任务进展。</div>`;
   const selectedTask = items.find(t=>t.id === traceSelected?.task);
   if(selectedTask){
-    const attempt = (selectedTask.attempts || []).find(r=>r.id === traceSelected.run);
+    const attempt = (selectedTask.attempts || []).find(r=>r.id === traceSelected.run && r.agentId === selected);
     html += `<div class="trace-selected"><h4>${esc(selectedTask.identifier)} · ${esc(selectedTask.title)}</h4>${attempt ? `<div class="task-facts">${esc(attempt.agentName)} · ${esc(RUN_STATUS[attempt.status] || attempt.status)}<br>开始：${esc(attempt.startedAt ? traceTime(Date.parse(attempt.startedAt)) : '尚未开始 / 未记录')}<br>结束：${esc(attempt.finishedAt ? traceTime(Date.parse(attempt.finishedAt)) : ['running','cancelling'].includes(attempt.status) ? '执行中' : '未记录')}<br>运行：${esc(attempt.id)}</div>` : ''}${taskDetailHTML(selectedTask)}</div>`;
   }
-  html += `<div class="task-note task-scope">点击轨道查看任务详情；横向重叠表示并行。仅含最近运行查询窗口，不代表完整历史；运行成功不等于任务验收完成。${esc(tasksMeta.note)}</div>`;
+  html += `<div class="task-note task-scope">仅显示 ${esc(names[selected] || '当前成员')} 参与执行的运行；点击查看详情。最近活动范围按最后运行时间定位，可向前翻页；全部记录仍受后端查询窗口限制。${esc(tasksMeta.note)}</div>`;
   return html;
 }
 function setTaskLayout(layout){
@@ -1623,10 +1648,19 @@ $('#tasks-list-view').onclick = () => setTaskLayout('list');
 $('#tasks-trace-view').onclick = () => setTaskLayout('trace');
 $('#tasks-search').oninput = () => renderTasks();
 $('#tasks-filter').onchange = () => renderTasks();
+$('#tasklist').addEventListener('change', e=>{
+  if(!e.target.matches('[data-trace-range]')) return;
+  traceRange=e.target.value;traceOffset=0;traceZoom=1;traceSelected=null;renderTasks();
+});
 $('#tasklist').addEventListener('click', e=>{
+  const windowButton = e.target.closest('[data-trace-window]');
+  if(windowButton){
+    traceOffset=Math.max(0,traceOffset+(windowButton.dataset.traceWindow==='previous'?1:-1));
+    traceSelected=null;renderTasks();return;
+  }
   const zoom = e.target.closest('[data-trace-zoom]');
   if(zoom){
-    traceZoom = zoom.dataset.traceZoom==='fit' ? 1 : Math.max(1,Math.min(8,traceZoom*(zoom.dataset.traceZoom==='in' ? 2 : .5)));
+    traceZoom = zoom.dataset.traceZoom==='fit' ? 1 : Math.max(1,Math.min(64,traceZoom*(zoom.dataset.traceZoom==='in' ? 2 : .5)));
     renderTasks();
     return;
   }
@@ -1705,7 +1739,7 @@ function selectAgent(id){
   chatMessages = []; chatInfo = null; chatState = "loading"; chatSignature = null;
   chatEnabled = false; chatReplying = false; chatAt = 0;
   tasksMeta = {groups:{open:0}, note:""}; taskOpen.clear();
-  traceSelected = null; traceZoom = 1;
+  traceSelected = null; traceZoom = 1; traceOffset = 0;
   $('#tasks-search').value = ''; $('#tasks-filter').value = 'all';
   $("#executionnotice").hidden = true;
   $("#tasknotice").hidden = true;
@@ -1809,7 +1843,7 @@ function executionHTML(run){
   const summary = run.summary?.text;
   if(summary && !entries.some(e=>e.kind==='assistant' && e.text.trim()===summary.trim())) content+=`<div class="assistant-output md"><div class="output-label">运行最终回复</div>${md(summary)}${run.summary.truncated?'<div class="execution-warning">最终回复过长，已截断。</div>':''}</div>`;
   if(!content) content=`<div class="execution-meta">${['running','queued'].includes(run.status)?'等待助手输出；运行期间自动刷新。':'本次没有记录助手输出。'}</div>`;
-  return `<article class="execution-run" data-event="${eventKey({...run,kind:'execution'})}" data-run="${esc(run.id)}"><div class="execution-head">${avatar(names[run.agentId] || names[selected])}<div class="execution-heading">${esc(run.issue || '')} · ${esc(run.issueTitle || '运行会话')}<div class="execution-meta">${dayLabel(run.ts)} ${hhmm(run.ts)}${run.finishedAt?' — '+hhmm(run.finishedAt):''} · 运行 ${esc(run.id.slice(0,8))}</div></div><span class="execution-status ${esc(run.status)}">${esc(RUN_STATUS[run.status] || run.status)}</span></div>${run.state!=='available'?`<div class="execution-warning">${esc(run.note || '会话详情不可用，仅展示已记录的运行结果。')}</div>`:''}${run.nextCursor?`<button class="execution-more" data-run-more="${esc(run.id)}" ${moreLoading.has(run.id)?'disabled':''}>${moreLoading.has(run.id)?'正在加载…':'↑ 加载本次运行更早的过程'}</button>`:''}${content}${run.error?`<div class="execution-warning">${esc(run.error)}</div>`:''}</article>`;
+  return `<article class="execution-run" data-event="${eventKey({...run,kind:'execution'})}" data-run="${esc(run.id)}"><div class="execution-head">${eventIcon('execution')}${avatar(names[run.agentId] || names[selected])}<div class="execution-heading">${esc(run.issue || '')} · ${esc(run.issueTitle || '运行会话')}<div class="execution-meta">${dayLabel(run.ts)} ${hhmm(run.ts)}${run.finishedAt?' — '+hhmm(run.finishedAt):''} · 运行 ${esc(run.id.slice(0,8))}</div></div><span class="execution-status ${esc(run.status)}">${esc(RUN_STATUS[run.status] || run.status)}</span></div>${run.state!=='available'?`<div class="execution-warning">${esc(run.note || '会话详情不可用，仅展示已记录的运行结果。')}</div>`:''}${run.nextCursor?`<button class="execution-more" data-run-more="${esc(run.id)}" ${moreLoading.has(run.id)?'disabled':''}>${moreLoading.has(run.id)?'正在加载…':'↑ 加载本次运行更早的过程'}</button>`:''}${content}${run.error?`<div class="execution-warning">${esc(run.error)}</div>`:''}</article>`;
 }
 $('#stream').addEventListener('click',async e=>{
   const button = e.target.closest('[data-run-more]');
@@ -1980,6 +2014,7 @@ function renderEvents(events){
       const st = ev.status || "";
       const otherIssue = ev.mine === false;
       html += `<div class="issue-sep ${otherIssue?"other":""}" data-event="${key}" title="${esc(ev.title)}">
+        ${eventIcon('task')}
         <span class="bar ${esc(st)}"></span>
         <span class="id">${esc(ev.issue)}</span>
         <span class="ttl">${esc(ev.title)}</span>
@@ -1994,7 +2029,7 @@ function renderEvents(events){
     const direction = ["in", "out"].includes(ev.dir) ? ev.dir : "related";
     html += `<div class="comm ${direction} ${activeMessage===key ? "active" : ""}" data-event="${key}">
       <button type="button" class="comm-summary" aria-controls="sidepanel" aria-expanded="${activeMessage===key}" aria-label="${esc(route + "：" + topic)}" title="${esc(route + " · " + topic)}">
-        <span class="comm-route">${avatarRoute(ev)}</span>
+        ${eventIcon('message')}<span class="comm-route">${avatarRoute(ev)}</span>
         <span class="comm-divider" aria-hidden="true">·</span><span class="comm-title">${esc(topic)}</span>
         <span class="receipt-badge ${receipt.tone}" title="${esc(receipt.label)}">${esc(receipt.label)}</span>
         <svg class="comm-chevron" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 4 4 4-4 4"/></svg>
