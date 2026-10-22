@@ -176,6 +176,32 @@ section{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .status-chip.blocked{background:#fff0ee;color:#b42318}
 .status-chip.in_progress{background:var(--accent-weak);color:var(--accent)}
 .status-chip.done{background:#edf8f1;color:#237845}
+.view-bar{display:flex;align-items:center;gap:10px;flex:none;padding:7px 32px;border-bottom:1px solid var(--line);background:#fff}
+.view-tabs{display:flex;gap:3px;padding:3px;border-radius:9px;background:#f1f3f6;flex:none}
+.view-tab{border:0;background:transparent;border-radius:7px;padding:5px 12px;font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer}
+.view-tab[aria-selected="true"]{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 2px #242b3610}
+.view-note{min-width:0;font-size:11px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-pane,.task-pane{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0}
+.task-foot{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:#fff;font-size:11px;color:var(--ink-3);text-align:center}
+.chat-inner{max-width:820px;margin:0 auto;display:flex;flex-direction:column;gap:14px;padding:8px 0 18px}
+.chat-row{display:flex;align-items:flex-start;gap:9px;max-width:100%}
+.chat-row.user{flex-direction:row-reverse}
+.chat-row.from-agent .ava{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex:none}
+.chat-body{min-width:0;max-width:min(78%,640px);display:flex;flex-direction:column;gap:3px}
+.chat-row.user .chat-body{align-items:flex-end}
+.chat-meta{display:flex;align-items:baseline;gap:6px;font-size:10.5px;color:var(--ink-3)}
+.chat-meta strong{font-weight:600;color:var(--ink-2)}
+.chat-bubble{border:1px solid var(--line-2);border-radius:12px;padding:9px 12px;background:#fff;font-size:13.5px;line-height:1.75;overflow-wrap:anywhere;min-width:0;max-width:100%}
+.chat-row.user .chat-bubble{background:var(--accent-weak);border-color:#f3d3c0;white-space:pre-wrap}
+.chat-row.system .chat-bubble{background:#f8f9fb;color:var(--ink-2);font-size:12px}
+.chat-bubble .md{font-size:inherit;line-height:inherit}
+.chat-bubble .md p{margin-bottom:8px}
+.chat-bubble .md p:last-child{margin-bottom:0}
+.chat-bubble .md pre.code{max-width:100%;font-size:12px}
+.chat-typing{display:flex;align-items:center;gap:7px;padding:2px 0 0 39px;font-size:11.5px;color:var(--ink-3)}
+.chat-typing .dot{width:6px;height:6px;border-radius:50%;background:var(--run);animation:chatpulse 1.2s ease-in-out infinite}
+@keyframes chatpulse{0%,100%{opacity:.35}50%{opacity:1}}
+.chat-note{text-align:center;font-size:10.5px;color:var(--ink-3);padding:2px 0}
 .stream-wrap{position:relative;display:flex;flex:1;min-height:0}
 .stream-notice{padding:7px 20px;background:#fff8ed;color:#965312;font-size:12px;text-align:center}
 .text-button{background:none;border:0;cursor:pointer;color:inherit;text-decoration:underline;text-underline-offset:3px;padding:5px 8px}
@@ -480,6 +506,14 @@ select.model{
   .pt-short{display:inline}
   .task-list{padding:10px}
   .task-title{font-size:12px}
+  .view-bar{padding:6px 14px;gap:8px}
+  .view-tab{padding:5px 10px;font-size:11.5px}
+  .view-note{font-size:10.5px}
+  .chat-row .ava{width:26px;height:26px;border-radius:8px}
+  .chat-body{max-width:82%}
+  .chat-bubble{font-size:13px;padding:8px 10px}
+  .chat-typing{padding-left:33px}
+  .task-foot{font-size:10.5px;padding:8px 12px calc(10px + env(safe-area-inset-bottom))}
   .receipt-badge{font-size:9px;max-width:30%}
   .comm-title{font-size:11px}
   .comm-detail{padding:12px}
@@ -532,34 +566,53 @@ select.model{
     <div class="room-body" id="roombody">
     <div class="conversation" id="conversation">
     <div class="stream-notice" id="roomnotice" role="status" hidden><span id="roomerror"></span><button class="text-button" id="retry">重试</button></div>
-    <div class="stream-notice" id="executionnotice" role="status" hidden></div>
-    <div class="stream-wrap">
-      <div class="stream" id="stream" tabindex="0" aria-label="成员任务与消息记录" aria-busy="true">
-        <div class="stream-inner"><div class="empty"><div class="big">H</div><strong>正在连接工作室</strong><span>获取团队状态与最近消息…</span></div></div>
+    <div class="view-bar">
+      <div class="view-tabs" role="tablist" aria-label="工作区视图">
+        <button type="button" class="view-tab" id="view-chat" role="tab" aria-selected="true" aria-controls="chatpane">对话</button>
+        <button type="button" class="view-tab" id="view-tasks" role="tab" aria-selected="false" aria-controls="taskpane" tabindex="-1">任务</button>
       </div>
-      <button class="latest" id="latest" hidden>↓ 回到最新消息</button>
+      <span class="view-note" id="viewnote">直接对话，不进入任务列表</span>
     </div>
-    <div class="composer">
-      <div class="composer-inner">
-        <div class="composer-label"><span id="recipient">选择成员后发送消息</span><span class="draft-label" id="draftlabel"></span></div>
-        <div class="box">
-          <textarea id="input" rows="1" placeholder="描述目标、补充信息，或问问当前进展…" aria-label="发送给成员的消息" disabled></textarea>
-          <div class="toolbar">
-            <label class="pill">
-              <span class="model-label">模型</span>
-              <select class="model" id="model" aria-label="当前成员的模型" disabled></select>
-              <span aria-hidden="true">⌄</span>
-            </label>
-            <div class="grow"></div>
-            <span class="counter" id="counter">0</span>
-            <button class="sendbtn" id="send" disabled aria-label="发送">
-              <span class="send-label">发送</span>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-            </button>
+    <div class="chat-pane" id="chatpane" role="tabpanel" aria-labelledby="view-chat">
+      <div class="stream-notice" id="chatnotice" role="status" hidden><span id="chaterror"></span><button class="text-button" id="chatretry">重试</button></div>
+      <div class="stream-wrap">
+        <div class="stream chat-stream" id="chatstream" tabindex="0" aria-label="与成员的直接对话" aria-busy="true">
+          <div class="stream-inner"><div class="empty"><div class="big">···</div><strong>正在加载对话</strong><span>获取与成员的直接消息…</span></div></div>
+        </div>
+        <button class="latest" id="chatlatest" hidden>↓ 回到最新消息</button>
+      </div>
+      <div class="composer">
+        <div class="composer-inner">
+          <div class="composer-label"><span id="recipient">选择成员后发送消息</span><span class="draft-label" id="draftlabel"></span></div>
+          <div class="box">
+            <textarea id="input" rows="1" placeholder="给成员发消息，直接开始对话…" aria-label="发送给成员的消息" disabled></textarea>
+            <div class="toolbar">
+              <label class="pill">
+                <span class="model-label">模型</span>
+                <select class="model" id="model" aria-label="当前成员的模型" disabled></select>
+                <span aria-hidden="true">⌄</span>
+              </label>
+              <div class="grow"></div>
+              <span class="counter" id="counter">0</span>
+              <button class="sendbtn" id="send" disabled aria-label="发送">
+                <span class="send-label">发送</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+              </button>
+            </div>
           </div>
         </div>
+        <div class="hint"><span>直接对话会唤醒成员；任务时间线在「任务」标签查看。</span><span>Enter 发送 · Shift+Enter 换行</span></div>
       </div>
-      <div class="hint"><span>有在办任务时追加评论，否则新建任务。</span><span>Enter 发送 · Shift+Enter 换行</span></div>
+    </div>
+    <div class="task-pane" id="taskpane" role="tabpanel" aria-labelledby="view-tasks" hidden>
+      <div class="stream-notice" id="executionnotice" role="status" hidden></div>
+      <div class="stream-wrap">
+        <div class="stream" id="stream" tabindex="0" aria-label="成员任务与消息记录" aria-busy="true">
+          <div class="stream-inner"><div class="empty"><div class="big">·</div><strong>正在连接工作室</strong><span>获取团队状态与最近消息…</span></div></div>
+        </div>
+        <button class="latest" id="latest" hidden>↓ 回到最新消息</button>
+      </div>
+      <div class="task-foot"><span>任务时间线只读；需要补充信息请使用对话。</span><button type="button" class="text-button" id="gotochat">去对话</button></div>
     </div>
     </div>
     <div class="message-panel" id="sidepanel" role="region" aria-label="任务进展与消息详情" hidden>
@@ -607,6 +660,9 @@ const drafts = new Map(), sending = new Set(), modelSaving = new Map();
 let activeMessage = null, messageEvents = new Map(), detailSignature = null;
 let tasks = [], tasksLoaded = false, tasksRequest = null, tasksSequence = 0, tasksSignature = null;
 let tasksMeta = {groups:{open:0}, note:""}, tasksAt = 0;
+let chatMessages = [], chatInfo = null, chatState = "loading", chatRequest = null;
+let chatSequence = 0, chatSignature = null, chatEnabled = false, chatReplying = false, chatAt = 0;
+let view = "chat";
 let panelOpen = false, panelTab = "tasks", panelInit = false;
 const taskOpen = new Set();
 let roomEvents = [], executionRuns = [], executionRequest = null, executionSequence = 0, executionLoaded = false;
@@ -806,6 +862,12 @@ function renderEmptyTeam(){
   $("#agents").innerHTML = '<div class="rail-empty">当前团队暂无成员</div>';
   railSignature = $("#agents").innerHTML;
   $("#tasklist").innerHTML = '<div class="empty"><div class="big">·</div><strong>当前团队暂无成员</strong><span>任务进展会在添加成员后显示。</span></div>';
+  chatMessages = []; chatInfo = null; chatState = "empty"; chatSignature = null;
+  chatEnabled = false; chatReplying = false;
+  $("#chatnotice").hidden = true;
+  renderChat();
+  $("#chatstream").setAttribute("aria-busy", "false");
+  $("#chatlatest").hidden = true;
   updateComposer();
   updateTaskBadge();
 }
@@ -814,6 +876,7 @@ function resetTeamView(){
   roomRequest?.controller.abort(); roomRequest = null; roomSequence++;
   executionRequest?.controller.abort(); executionRequest = null; executionSequence++;
   tasksRequest?.controller.abort(); tasksRequest = null; tasksSequence++;
+  chatRequest?.controller.abort(); chatRequest = null; chatSequence++;
   activeMessage = null; detailSignature = null; messageEvents.clear();
   if(panelTab === "message"){ panelTab = "tasks"; renderPanelTabs(); }
   syncActiveMessage();
@@ -821,11 +884,16 @@ function resetTeamView(){
   roomEvents = []; executionRuns = []; executionLoaded = false;
   roomSignature = null; railSignature = "";
   tasks = []; tasksLoaded = false; tasksSignature = null; tasksAt = 0;
+  chatMessages = []; chatInfo = null; chatState = "loading"; chatSignature = null;
+  chatEnabled = false; chatReplying = false; chatAt = 0;
   tasksMeta = {groups:{open:0}, note:""}; taskOpen.clear();
   $("#executionnotice").hidden = true;
   $("#roomnotice").hidden = true;
   $("#tasknotice").hidden = true;
+  $("#chatnotice").hidden = true;
   $("#stream").innerHTML = '<div class="empty"><div class="big">···</div><strong>正在切换团队</strong><span>获取成员与任务记录…</span></div>';
+  $("#chatstream").innerHTML = '<div class="stream-inner"><div class="empty"><div class="big">···</div><strong>正在切换对话</strong><span>获取成员与直接消息…</span></div></div>';
+  $("#chatlatest").hidden = true;
   $("#agents").innerHTML = '<div class="rail-empty">正在加载…</div>';
   $("#tasklist").innerHTML = '<div class="task-skeleton">正在读取任务进展…</div>';
   $("#agent-count").textContent = "—";
@@ -841,6 +909,7 @@ function resetTeamView(){
   $("#roomhead .ava").outerHTML = avatar(teamDisplayName());
   $("#live").classList.remove("offline");
   $("#livetext").textContent = "正在切换";
+  setView("chat");
   refreshState();
 }
 function switchTeam(id){
@@ -883,6 +952,7 @@ async function refreshState(){
     } else if(!agents.some(a => a.id === selected)) selectAgent(agents[0].id);
     else { renderRail(); renderHead(); renderModel(); }
     updateBrand();
+    if(view === "chat") renderChat();
     if(!panelInit){
       panelInit = true;
       if(window.matchMedia("(min-width: 961px)").matches) openPanel("tasks");
@@ -895,6 +965,8 @@ async function refreshState(){
     if(!selected){
       $("#stream").innerHTML = '<div class="empty"><div class="big">↻</div><strong>暂时无法连接工作室</strong><span>正在自动重连，也可以点击重试。</span></div>';
       $("#stream").setAttribute("aria-busy", "false");
+      chatState = "unavailable"; chatEnabled = false; chatReplying = false;
+      renderChat();
       $("#roomnotice").hidden = false;
       $("#roomerror").textContent = "未获取到团队状态。";
     }
@@ -955,11 +1027,137 @@ function renderHead(){
     context.innerHTML = `<span class="muted task-caption">当前任务</span><strong>${esc(a.current.identifier)}</strong><span class="task-title">${esc(a.current.title)}</span>${statusChip(a.current.status)}`;
     context.title = a.current.title;
   }
-  $("#recipient").textContent = `发送给 ${a.name}`;
-  $("#input").placeholder = a.name === "PL" ? "描述目标、调整优先级，或问问团队进展…" : `给 ${a.name} 补充信息，或询问当前进展…`;
+  $("#recipient").textContent = `与 ${a.name} 对话`;
+  $("#input").placeholder = `给 ${a.name} 发消息，直接开始对话…`;
   updateComposer();
   updateTaskBadge();
 }
+
+/* ---------- 直接对话 ---------- */
+function setView(next){
+  if(next !== "chat" && next !== "tasks") return;
+  view = next;
+  const chat = view === "chat";
+  $("#chatpane").hidden = !chat;
+  $("#taskpane").hidden = chat;
+  $("#view-chat").setAttribute("aria-selected", String(chat));
+  $("#view-chat").tabIndex = chat ? 0 : -1;
+  $("#view-tasks").setAttribute("aria-selected", String(!chat));
+  $("#view-tasks").tabIndex = chat ? -1 : 0;
+  $("#viewnote").textContent = chat ? "直接对话，不进入任务列表" : "任务与运行记录（只读）";
+  if(chat){
+    if(activeMessage) closeDetail(false);
+    if(chatState === "unavailable" || (chatAt && Date.now() - chatAt > 3000)) loadChat(true);
+    updateChatLatest();
+    updateComposer();
+  } else {
+    if(roomSignature === null) loadRoom();
+    if(!executionLoaded) loadExecution();
+    updateLatest();
+  }
+}
+
+async function loadChat(force = false){
+  if(!selected){
+    chatState = agents.length ? "unavailable" : "empty";
+    chatInfo = null; chatMessages = []; chatEnabled = false; chatReplying = false;
+    renderChat(); updateComposer(); return;
+  }
+  if(chatRequest && !force) return;
+  chatRequest?.controller.abort();
+  const id = selected, sequence = ++chatSequence, controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), 30000);
+  chatRequest = {controller};
+  $("#chatstream").setAttribute("aria-busy", "true");
+  try{
+    const d = await requestJSON("/api/chat?agent=" + encodeURIComponent(id), {signal:controller.signal});
+    if(id !== selected || sequence !== chatSequence) return;
+    if(!d || typeof d.state !== "string") throw new Error("对话格式异常");
+    chatState = d.state;
+    chatInfo = d.chat || null;
+    chatMessages = Array.isArray(d.messages) ? d.messages : [];
+    chatEnabled = d.state === "available" || d.state === "new";
+    chatAt = Date.now();
+    const running = agents.find(a => a.id === selected)?.running || 0;
+    chatReplying = !!(chatInfo && chatInfo.conversationState === "active") || running > 0;
+    const notice = $("#chatnotice");
+    if(d.state === "disabled" || d.state === "unavailable"){
+      notice.hidden = false;
+      $("#chaterror").textContent = d.note || "对话暂不可用。";
+    } else notice.hidden = true;
+    renderChat();
+    updateComposer();
+  }catch(e){
+    if(id !== selected || sequence !== chatSequence) return;
+    if(!chatMessages.length){ chatState = "unavailable"; chatEnabled = false; }
+    $("#chatnotice").hidden = false;
+    $("#chaterror").textContent = "对话同步暂时中断，已保留当前消息。";
+    renderChat(); updateComposer();
+  }finally{
+    clearTimeout(timer);
+    if(sequence === chatSequence){ chatRequest = null; $("#chatstream").setAttribute("aria-busy", "false"); }
+  }
+}
+
+function chatMessageHTML(message){
+  const mine = message.author === "user", agent = message.author === "agent";
+  const time = `${dayLabel(message.ts)} ${hhmm(message.ts)}`;
+  const meta = mine
+    ? `<time datetime="${esc(message.ts)}">${esc(time)}</time><strong>我</strong>`
+    : `<strong>${esc(message.authorName || "系统")}</strong><time datetime="${esc(message.ts)}">${esc(time)}</time>`;
+  const body = agent
+    ? `<div class="chat-bubble md">${md(message.text)}${message.truncated ? '<div class="execution-warning">消息过长，已截断。</div>' : ""}</div>`
+    : `<div class="chat-bubble">${esc(message.text)}${message.truncated ? '<div class="execution-warning">消息过长，已截断。</div>' : ""}</div>`;
+  return `<div class="chat-row ${mine ? "user" : agent ? "from-agent" : "system"}">${agent ? avatar(message.authorName) : ""}<div class="chat-body"><div class="chat-meta">${meta}</div>${body}</div></div>`;
+}
+
+function renderChat(){
+  const box = $("#chatstream");
+  const name = names[selected] || "成员";
+  const signature = JSON.stringify([selected, chatState, chatInfo, chatMessages, chatReplying]);
+  const first = chatSignature === null;
+  const stuck = first || box.scrollHeight - box.scrollTop - box.clientHeight < 90;
+  const oldTop = box.scrollTop;
+  chatSignature = signature;
+  if(chatState === "loading"){
+    box.innerHTML = '<div class="stream-inner"><div class="empty"><div class="big">···</div><strong>正在加载对话</strong><span>获取与成员的直接消息…</span></div></div>';
+  } else if(chatState === "empty"){
+    box.innerHTML = '<div class="stream-inner"><div class="empty"><div class="big">·</div><strong>当前团队暂无成员</strong><span>添加成员后即可开始直接对话。</span></div></div>';
+  } else if(chatState === "disabled"){
+    box.innerHTML = '<div class="stream-inner"><div class="empty"><div class="big">!</div><strong>Agent Chat 未启用</strong><span>需要在 Paperclip 实例的 Experimental 设置中开启 Agent Chat。</span></div></div>';
+  } else if(chatState === "unavailable"){
+    box.innerHTML = '<div class="stream-inner"><div class="empty"><div class="big">↻</div><strong>对话暂不可用</strong><span>可以点击上方重试，任务时间线不受影响。</span></div></div>';
+  } else if(!chatMessages.length){
+    box.innerHTML = `<div class="stream-inner"><div class="empty"><div class="big">↗</div><strong>与 ${esc(name)} 开始对话</strong><span>消息会直接唤醒成员，不进入任务列表。<br>需要派活时，在对话里说明即可。</span></div></div>`;
+  } else {
+    let html = "", lastDay = "";
+    for(const message of chatMessages){
+      const day = dayKey(message.ts);
+      if(day && day !== lastDay){
+        html += `<div class="daysep"><span>${dayLabel(message.ts)}</span></div>`;
+        lastDay = day;
+      }
+      html += chatMessageHTML(message);
+    }
+    if(chatReplying) html += `<div class="chat-typing"><span class="dot"></span>${esc(name)} 正在回复…</div>`;
+    box.innerHTML = `<div class="chat-inner">${html}</div>`;
+  }
+  if(stuck) box.scrollTop = box.scrollHeight;
+  else box.scrollTop = oldTop;
+  updateChatLatest();
+}
+
+function updateChatLatest(){
+  const box = $("#chatstream");
+  $("#chatlatest").hidden = chatSignature === null || box.scrollHeight - box.scrollTop - box.clientHeight < 90;
+}
+
+$("#view-chat").onclick = () => setView("chat");
+$("#view-tasks").onclick = () => setView("tasks");
+$("#gotochat").onclick = () => { setView("chat"); $("#input").focus(); };
+$("#chatretry").onclick = () => loadChat(true);
+$("#chatstream").addEventListener("scroll", updateChatLatest, {passive:true});
+$("#chatlatest").onclick = () => { $("#chatstream").scrollTop = $("#chatstream").scrollHeight; updateChatLatest(); };
 
 /* ---------- 右栏：任务进展 ---------- */
 const TASK_PRIORITY = {critical:["P0","critical"], high:["P1","high"], medium:["P2","medium"], low:["P3","low"]};
@@ -1144,7 +1342,7 @@ function renderTasks(){
   Array.from(box.querySelectorAll("details[open]")).forEach(el => taskOpen.add(el.dataset.task));
   tasksSignature = signature;
   if(!tasks.length){
-    box.innerHTML = '<div class="empty"><div class="big">✓</div><strong>暂无关联任务</strong><span>发给该成员的消息会新建任务，或追加到现有任务。</span></div>';
+    box.innerHTML = '<div class="empty"><div class="big">✓</div><strong>暂无关联任务</strong><span>对话不会自动建单；成员创建的任务会显示在这里。</span></div>';
     pane.scrollTop = scroll;
     return;
   }
@@ -1220,12 +1418,18 @@ function selectAgent(id){
   roomRequest?.controller.abort();
   executionRequest?.controller.abort(); executionRequest = null; executionSequence++;
   tasksRequest?.controller.abort(); tasksRequest = null; tasksSequence++;
+  chatRequest?.controller.abort(); chatRequest = null; chatSequence++;
   roomEvents = []; executionRuns = []; executionLoaded = false;
   tasks = []; tasksLoaded = false; tasksSignature = null; tasksAt = 0;
+  chatMessages = []; chatInfo = null; chatState = "loading"; chatSignature = null;
+  chatEnabled = false; chatReplying = false; chatAt = 0;
   tasksMeta = {groups:{open:0}, note:""}; taskOpen.clear();
   $("#executionnotice").hidden = true;
   $("#tasknotice").hidden = true;
+  $("#chatnotice").hidden = true;
   $("#tasklist").innerHTML = '<div class="task-skeleton">正在读取任务进展…</div>';
+  $("#chatstream").innerHTML = '<div class="stream-inner"><div class="empty"><div class="big">···</div><strong>正在加载对话</strong><span>获取与成员的直接消息…</span></div></div>';
+  $("#chatlatest").hidden = true;
   roomRequest = null; roomSequence++;
   selected = id;
   roomSignature = null;
@@ -1234,7 +1438,7 @@ function selectAgent(id){
   $("#stream").scrollTop = 0;
   $("#latest").hidden = true;
   $("#roomnotice").hidden = true;
-  renderRail(); renderHead(); renderModel(); loadRoom(); loadExecution();
+  renderRail(); renderHead(); renderModel(); loadRoom(); loadExecution(); loadChat();
   if(panelOpen) loadTasks();
 }
 
@@ -1264,7 +1468,7 @@ async function loadRoom(force = false){
     if(sequence === roomSequence){ roomRequest = null; $("#stream").setAttribute("aria-busy", "false"); }
   }
 }
-$("#retry").onclick = () => { refreshState(); if(selected){ loadRoom(true); loadExecution(true); } };
+$("#retry").onclick = () => { refreshState(); if(selected){ loadRoom(true); loadExecution(true); loadChat(true); } };
 
 function mergedEntries(...groups){
   const entries = new Map(groups.flat().map(e=>[e.id,e]));
@@ -1353,7 +1557,7 @@ function updateLatest(){
 $("#stream").addEventListener("scroll", updateLatest, {passive:true});
 $("#latest").onclick = () => { $("#stream").scrollTop = $("#stream").scrollHeight; updateLatest(); };
 
-window.addEventListener("resize", updateLatest);
+window.addEventListener("resize", () => { updateLatest(); updateChatLatest(); });
 
 function communication(ev){
   const sender = ev.sender || {name:names[ev.agent] || (ev.agent ? "未知成员" : ev.user ? "用户" : "系统")};
@@ -1468,7 +1672,7 @@ function renderEvents(events){
   messageEvents = new Map(events.filter(ev=>ev.kind === "comment").map(ev=>[eventKey(ev),ev]));
   if(activeMessage && !messageEvents.has(activeMessage)) closeDetail(false);
   if(!events.length){
-    box.innerHTML = `<div class="stream-inner"><div class="empty"><div class="big">↗</div><strong>与 ${esc(names[selected] || "成员")} 开始协作</strong><span>这里会汇集最近任务中的消息。<br>发送第一条需求，开始一项新任务。</span></div></div>`;
+    box.innerHTML = `<div class="stream-inner"><div class="empty"><div class="big">↗</div><strong>暂无任务时间线</strong><span>该成员最近没有任务消息。<br>需要沟通请切换到「对话」。</span></div></div>`;
     updateLatest();
     return;
   }
@@ -1529,13 +1733,14 @@ function renderEvents(events){
 const input = $("#input");
 function updateComposer(){
   const pending = sending.has(selected);
-  input.disabled = !selected || pending;
-  $("#send").disabled = !selected || pending || !input.value.trim();
+  const ready = !!selected && chatEnabled && !pending;
+  input.disabled = !ready;
+  $("#send").disabled = !ready || !input.value.trim();
   $("#send").setAttribute("aria-label", pending ? "正在发送" : `发送给 ${names[selected] || "成员"}`);
   $("#send .send-label").textContent = pending ? "发送中" : "发送";
   $("#draftlabel").textContent = pending ? "正在发送…" : input.value ? "草稿 · 切换成员会保留" : "";
   input.style.height = "auto";
-  input.style.height = Math.min(input.scrollHeight, 130) + "px";
+  input.style.height = $("#chatpane").hidden ? "" : Math.min(input.scrollHeight, 130) + "px";
   $("#counter").textContent = input.value.length;
 }
 input.addEventListener("input", () => {
@@ -1551,21 +1756,29 @@ input.addEventListener("keydown", e => {
 
 async function doSend(){
   const text = input.value.trim();
-  if(!text || !selected || sending.has(selected)) return;
+  if(!text || !selected || sending.has(selected) || !chatEnabled) return;
   const id = selected, name = names[id];
   drafts.set(id, input.value);
   sending.add(id); updateComposer();
   try{
-    const d = await requestJSON("/api/send", {
+    const d = await requestJSON("/api/chat", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({agentId:id, text})
     });
     if(d.ok){
       drafts.delete(id);
-      if(selected === id){ input.value = ""; loadRoom(true); if(panelOpen) loadTasks(true); }
-      toast(`${name} · ${d.mode === "comment" ? "已追加到" : "已新建任务"} ${d.issue || ""}`);
+      if(selected === id){
+        input.value = "";
+        chatReplying = true;
+        renderChat();
+        loadChat(true);
+      }
+      toast(`已发送给 ${name}`);
       refreshState();
-    } else toast("失败：" + (d.error || "未知"));
+    } else {
+      toast("发送失败：" + (d.error || "未知"));
+      loadChat(true);
+    }
   }catch(e){ toast("未确认发送结果，草稿已保留；请核对消息后再试"); }
   finally{ sending.delete(id); updateComposer(); }
 }
@@ -1576,11 +1789,13 @@ function startTimers(){
   setInterval(() => { if(!document.hidden) loadRoom(); }, 8000);
   setInterval(() => { if(!document.hidden) loadExecution(); }, 8000);
   setInterval(() => { if(!document.hidden && panelOpen && panelTab === "tasks") loadTasks(); }, 8000);
+  setInterval(() => { if(!document.hidden && view === "chat" && chatState !== "disabled" && chatState !== "empty") loadChat(); }, 4000);
   document.addEventListener("visibilitychange", () => {
     if(!document.hidden){
       refreshState();
       loadRoom();
       loadExecution();
+      if(view === "chat") loadChat();
       if(panelOpen && panelTab === "tasks") loadTasks();
     }
   });

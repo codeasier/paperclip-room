@@ -101,10 +101,15 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(server.session_transcript({**self.run_meta, 'id': 'run-y'})['state'], 'pending')
 
     def test_api_limits_runs_and_does_not_mix_members(self):
-        runs = [dict(self.run_meta,companyId=server.COMPANY,resultJson={'result':'final'}),dict(self.run_meta,id='foreign',companyId=server.COMPANY,agentId='other')]
-        with patch.object(server,'fetch_agents',return_value=[{'id':'pl'}]), patch.object(server,'call',return_value=(200,runs)), patch.object(server,'fetch_issues',return_value=[]):
+        runs = [
+            dict(self.run_meta, companyId=server.COMPANY, contextSnapshot={'issueId':'i1'}, resultJson={'result':'final'}),
+            dict(self.run_meta, id='foreign', companyId=server.COMPANY, agentId='other', contextSnapshot={'issueId':'i1'}),
+            dict(self.run_meta, id='chat-run', companyId=server.COMPANY, contextSnapshot={'issueId':'chat-1'}, resultJson={'result':'chat'}),
+        ]
+        issues = [{'id':'i1','identifier':'HER-1','title':'任务'}]
+        with patch.object(server,'fetch_agents',return_value=[{'id':'pl'}]), patch.object(server,'call',return_value=(200,runs)), patch.object(server,'fetch_issues',return_value=issues):
             data=server.execution_timeline('pl')
-        self.assertEqual(len(data['runs']),1)
+        self.assertEqual([run['id'] for run in data['runs']], ['run-1'])
         self.assertEqual(data['runs'][0]['summary']['text'],'final')
 
 

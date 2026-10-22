@@ -24,20 +24,34 @@ Python ThreadingHTTPServer (server.py)
 | GET | `/`、`/index.html` | 静态页面，按请求读盘 |
 | GET | `/api/teams` | 当前 token 可见的 active 团队（Paperclip 公司），含默认团队标记 |
 | GET | `/api/state?company=<id>` | 指定团队成员、当前任务、活跃运行与模型快照 |
+| GET | `/api/chat?company=<id>&agent=<id>` | 当前 board 用户与该成员的 Agent Chat 会话与消息 |
+| POST | `/api/chat?company=<id>` | JSON `{ "agentId": "…", "text": "…" }`；发送 Agent Chat 消息，必要时自动创建会话 |
 | GET | `/api/tasks?company=<id>&agent=<id>` | 成员名下未结/最近完成任务，以及最近参与或被点名的其他任务；含检查项、运行与讨论摘要 |
 | GET | `/api/room?company=<id>&agent=<id>` | 成员相关任务、评论与精确运行回执 |
 | GET | `/api/execution?company=<id>&agent=<id>` | 当前成员最近4次运行及最新过程页 |
 | GET | `/api/run?company=<id>&agent=<id>&run=<uuid>&before=<cursor>` | 指定运行的更早过程页；校验团队与成员归属 |
-| POST | `/api/send?company=<id>` | JSON `{ "agentId": "…", "text": "…" }`；追加评论或新建任务 |
+| POST | `/api/send?company=<id>` | 旧版任务评论入口，保留兼容；当前界面不再使用 |
 | POST | `/api/model` | JSON `{ "agentId": "…", "model": "…" }`；修改 adapterConfig.model |
 
-除 `/api/teams` 外，所有团队相关接口都接受 `company` 参数；省略时回落到 `PAPERCLIP_COMPANY`。服务端只接受当前 token 可见且 active 的公司 ID，缓存按公司隔离。响应使用 JSON 和 `Cache-Control: no-store`。没有 SSE/WebSocket；状态5秒轮询，任务进展、评论和过程8秒轮询，标签页进入后台时暂停。环境配置在进程启动时读取。
+除 `/api/teams` 外，所有团队相关接口都接受 `company` 参数；省略时回落到 `PAPERCLIP_COMPANY`。服务端只接受当前 token 可见且 active 的公司 ID，缓存按公司隔离。响应使用 JSON 和 `Cache-Control: no-store`。没有 SSE/WebSocket；状态5秒轮询，对话消息4秒轮询，任务进展、任务评论和过程8秒轮询，标签页进入后台时暂停。环境配置在进程启动时读取。
 
 ## Paperclip 接口依赖
 
-后端使用公司的 agents、issues、heartbeat-runs 列表、任务 comments、单个 heartbeat run，以及成员模型 PATCH 等接口。API 根路径由 `PAPERCLIP_BASE` 追加 `/api/...` 形成。不同 Paperclip 版本或 token 权限可能影响字段和可用性，应以所部署版本为准。
+后端使用公司的 agents、issues、heartbeat-runs 列表、任务 comments、Agent Chat chats 接口、单个 heartbeat run，以及成员模型 PATCH 等接口。API 根路径由 `PAPERCLIP_BASE` 追加 `/api/...` 形成。不同 Paperclip 版本或 token 权限可能影响字段和可用性，应以所部署版本为准。
 
 本项目主要为 Hermes 本地适配器运行的团队设计。页面读取已有运行、评论和配置，不承担 Paperclip 调度器或 Agent runner 的职责。
+
+## Agent Chat
+
+Agent Chat 需要实例 Experimental 设置中的 `enableAgentChat` 已开启，并且后端 token 对应 board 用户。
+
+- `GET /api/companies/{companyId}/chats/{agentId}` 读取当前 board 用户与该成员的会话；没有时返回 `null`，不会在读取时创建。
+- 首次发送时 `POST` 同一路径创建会话；Paperclip 用 `(companyId, conversationAgentId, conversationUserId)` 唯一确定一条会话。
+- 会话本质是被 Paperclip 从普通任务列表隐藏的 issue；消息是 issue comments，发送时必须带 `clientRequestId`。
+- 本控制台的 `POST /api/chat` 会先确保会话存在，再发送评论；不调用原来“追加评论或新建任务”的 `/api/send`。
+- 会话回复按评论轮询读取；没有 SSE/WebSocket。
+- 会话属于后端 token 的 board 用户（当前 `local-board`），不同 board 用户看到不同会话。
+- Agent Chat 关闭时接口返回明确状态，界面禁用输入，不会退回任务模式。
 
 ## 会话记录关联
 
@@ -58,10 +72,12 @@ Python ThreadingHTTPServer (server.py)
 ## 查询边界
 
 - 团队列表来自 `GET /api/companies`，缓存30秒；只展示 active 公司，默认团队排首位。
+- 对话消息按 `order=asc` 读取全部 comments；长会话会随消息增长，当前没有做分页窗口。
 - 任务聚合查询带 `limit=100`，具体返回行为由上游版本决定。
 - 任务进展取最近100个任务：名下未结全部保留、已完成只列最近4项；参与讨论只扫描最近12个其他任务，不是全历史。
 - 检查项只读取任务描述中的 Markdown 勾选行，忽略代码块；描述被平台截断时标注“描述已截断”，不推测剩余项。
 - 任务运行统计来自最近200次 heartbeat runs，按 `contextSnapshot` 的 `issueId` / `taskId` 精确归属；窗口内没有记录时显示“近期无运行记录”，不推断为从未运行。
+- 任务时间线只展示最近100个任务内的运行；Agent Chat 会话运行不属于任务，会被排除，避免在时间线上出现 UUID 标题的运行卡。
 - 评论时间线扫描最近6个名下任务与12个其他任务，输出最近160个事件，不是全历史。
 - 接收对象只依据评论首行明确指向；未指定对象的消息显示实际任务讨论区。
 - 回执查询最近至多200条heartbeat runs，缓存4秒，以评论ID与任务ID双重精确匹配唤醒上下文。未查到不等于无人接收，运行成功不等于逐条已读或业务验收。
@@ -73,9 +89,11 @@ Python ThreadingHTTPServer (server.py)
 - 成员草稿保存在当前页面的Map中，不写localStorage，刷新丢失；切换团队时清空。
 - 团队选择写入 `localStorage`（`room.team`），只影响浏览器视图，不修改 Paperclip。
 - 切成员时取消旧请求并校验请求序列，避免延迟响应覆盖当前成员。
+- 中央默认「对话」，任务时间线在「任务」标签只读展示；对话每4秒轮询，切回对话时若超过3秒会强制刷新。
 - 右侧栏在任务进展与消息详情之间切换；展开的任务卡按任务ID保留，任务进展每8秒刷新且只在任务标签可见时轮询。
 - 评论用稳定ID保持侧栏选择，工具按运行ID/消息ID保持展开状态；更新时尽量保留滚动锚点。
-- 展开的通信详情占用真实flex布局空间；760px及以下切换至全宽详情，关闭返回会话。
+- 展开的通信详情占用真实flex布局空间；760px及以下切换至全宽详情，关闭返回任务时间线。
+- Agent Chat 会话 ID、会话状态和消息不写入浏览器存储；只保存团队选择。
 
 ## 维护与部署
 

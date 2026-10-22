@@ -15,6 +15,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -748,11 +749,22 @@ def execution_timeline(agent_id, company=None):
     company = company or COMPANY
     if not any(a.get("id") == agent_id for a in agents_for(company)):
         return {"agentId": agent_id, "state": "unavailable", "runs": [], "note": "成员不存在。"}
-    status, data = call("GET", f"/api/companies/{company}/heartbeat-runs?agentId={quote(agent_id, safe='')}&limit=4")
+    status, data = call("GET", f"/api/companies/{company}/heartbeat-runs?agentId={quote(agent_id, safe='')}&limit=20")
     if status != 200 or not (isinstance(data, list) or isinstance(data, dict) and isinstance(data.get("runs"), list)):
         return {"agentId": agent_id, "state": "unavailable", "runs": [], "note": "运行记录暂不可用。"}
-    runs = [r for r in as_list(data, "runs") if r.get("agentId") == agent_id and r.get("companyId") == company]
-    return {"agentId": agent_id, "state": "available", "runs": [execution_run(run, company=company) for run in runs[:4]], "note": "展示当前成员最近 4 次运行，按原始会话顺序展示公开输出。"}
+    issues = fetch_issues(company)
+    issue_ids = {issue.get("id") for issue in issues}
+    runs = []
+    for run in as_list(data, "runs"):
+        if run.get("agentId") != agent_id or run.get("companyId") != company:
+            continue
+        context = run.get("contextSnapshot") or {}
+        issue_id = context.get("issueId") or context.get("taskId")
+        # 直接对话会话被 Paperclip 从普通任务列表隐藏；它的运行也不应混入任务时间线。
+        if issue_id not in issue_ids:
+            continue
+        runs.append(run)
+    return {"agentId": agent_id, "state": "available", "runs": [execution_run(run, company=company) for run in runs[:4]], "note": "展示当前成员最近 4 次任务运行，按原始会话顺序展示公开输出。"}
 
 
 def send_message(agent_id, text, company=None):
@@ -782,6 +794,110 @@ def send_message(agent_id, text, company=None):
         return {"ok": True, "mode": "new-issue",
                 "issue": (data or {}).get("identifier")}
     return {"ok": False, "error": f"建单失败 HTTP {st}: {json.dumps(data, ensure_ascii=False)[:200]}"}
+
+
+def _chat_agent(company, agent_id):
+    agents = agents_for(company)
+    agent = next((a for a in agents if a.get("id") == agent_id), None)
+    return agent, agents
+
+
+def _chat_disabled(status, data):
+    return status == 404 and isinstance(data, dict) and "Agent Chat is disabled" in str(data.get("error") or "")
+
+
+def chat_messages(issue_id, directory):
+    status, data = call("GET", f"/api/issues/{issue_id}/comments?order=asc")
+    if status != 200:
+        return None
+    messages = []
+    for comment in as_list(data, "comments"):
+        if comment.get("deletedAt"):
+            continue
+        body = comment.get("body") or ""
+        if not body.strip():
+            continue
+        author_id = comment.get("authorAgentId") or comment.get("derivedAuthorAgentId")
+        user_id = comment.get("authorUserId") or comment.get("onBehalfOfUserId")
+        if author_id:
+            author, name = "agent", directory.get(author_id.casefold(), {}).get("name") or "成员"
+        elif user_id:
+            author, name = "user", "我"
+        else:
+            author, name = "system", "系统"
+        preview = public_text(body)
+        messages.append({
+            "id": comment.get("id"),
+            "author": author,
+            "authorName": name,
+            "ts": comment.get("createdAt"),
+            "text": preview["text"],
+            "truncated": preview["truncated"],
+        })
+    messages.sort(key=lambda item: item.get("ts") or "")
+    return messages
+
+
+def chat_snapshot(company, agent_id):
+    agent, agents = _chat_agent(company, agent_id)
+    if not agent:
+        return {"agentId": agent_id, "state": "unavailable", "messages": [], "note": "成员不存在。"}
+    status, data = call("GET", f"/api/companies/{company}/chats/{quote(agent_id, safe='')}")
+    if _chat_disabled(status, data):
+        return {"agentId": agent_id, "agentName": agent.get("name"), "state": "disabled",
+                "messages": [], "note": "Paperclip 实例尚未启用 Agent Chat。"}
+    if status != 200:
+        return {"agentId": agent_id, "agentName": agent.get("name"), "state": "unavailable",
+                "messages": [], "note": f"对话记录暂不可用（HTTP {status}）。"}
+    if not data:
+        return {"agentId": agent_id, "agentName": agent.get("name"), "state": "new",
+                "chat": None, "messages": [], "note": "还没有对话，发送第一条消息即可开始。"}
+    if data.get("companyId") != company or data.get("conversationAgentId") != agent_id:
+        return {"agentId": agent_id, "agentName": agent.get("name"), "state": "unavailable",
+                "messages": [], "note": "对话归属与当前团队不一致。"}
+    messages = chat_messages(data.get("id"), recipient_directory(agents))
+    if messages is None:
+        return {"agentId": agent_id, "agentName": agent.get("name"), "state": "unavailable",
+                "chat": {"id": data.get("id")}, "messages": [], "note": "对话消息暂不可用。"}
+    return {
+        "agentId": agent_id,
+        "agentName": agent.get("name"),
+        "state": "available",
+        "chat": {
+            "id": data.get("id"),
+            "identifier": data.get("identifier"),
+            "title": data.get("title"),
+            "status": data.get("status"),
+            "conversationState": data.get("conversationState"),
+            "lastActivityAt": data.get("lastActivityAt") or data.get("updatedAt"),
+        },
+        "messages": messages,
+        "note": "直接对话；消息会唤醒成员，不创建任务。",
+    }
+
+
+def send_chat(company, agent_id, text):
+    agent, _ = _chat_agent(company, agent_id)
+    if not agent:
+        return {"ok": False, "state": "unavailable", "error": "成员不存在。"}
+    status, chat = call("GET", f"/api/companies/{company}/chats/{quote(agent_id, safe='')}")
+    if _chat_disabled(status, chat):
+        return {"ok": False, "state": "disabled", "error": "Paperclip 实例尚未启用 Agent Chat。"}
+    if status != 200:
+        return {"ok": False, "error": f"读取对话失败 HTTP {status}"}
+    if not chat:
+        status, chat = call("POST", f"/api/companies/{company}/chats/{quote(agent_id, safe='')}", {})
+        if status not in (200, 201) or not isinstance(chat, dict):
+            return {"ok": False, "error": f"创建对话失败 HTTP {status}"}
+    if chat.get("companyId") != company or chat.get("conversationAgentId") != agent_id:
+        return {"ok": False, "error": "对话归属与当前团队不一致。"}
+    comment = {"body": text, "clientRequestId": str(uuid.uuid4())}
+    status, saved = call("POST", f"/api/issues/{chat['id']}/comments", comment)
+    if status in (200, 201):
+        return {"ok": True, "chatId": chat.get("id"), "identifier": chat.get("identifier"),
+                "commentId": saved.get("id") if isinstance(saved, dict) else None}
+    return {"ok": False,
+            "error": f"发送失败 HTTP {status}: {json.dumps(saved, ensure_ascii=False)[:180]}"}
 
 
 def set_model(agent_id, model):
@@ -865,6 +981,18 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(500, {"error": str(e)})
 
+        if p == "/api/chat":
+            company = self._company(query)
+            if not company:
+                return self._send(404, {"error": "team not found"})
+            aid = (query.get("agent") or [""])[0]
+            if not re.fullmatch(r"[a-zA-Z0-9-]{1,80}", aid):
+                return self._send(400, {"error": "valid agent required"})
+            try:
+                return self._send(200, chat_snapshot(company, aid))
+            except Exception as e:
+                return self._send(500, {"error": str(e)})
+
         if p == "/api/room":
             company = self._company(query)
             if not company:
@@ -907,6 +1035,15 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         query = parse_qs(u.query)
         body = self._json_body()
+
+        if u.path == "/api/chat":
+            company = self._company(query, body)
+            if not company:
+                return self._send(404, {"error": "team not found"})
+            aid, text = body.get("agentId"), (body.get("text") or "").strip()
+            if not aid or not text:
+                return self._send(400, {"error": "agentId and text required"})
+            return self._send(200, send_chat(company, aid, text))
 
         if u.path == "/api/send":
             company = self._company(query, body)
