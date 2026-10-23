@@ -3,6 +3,7 @@ Description=Paperclip Room team console
 After=network.target
 
 [Service]
+# Build frontend/dist before starting (make install build), or copy it from a build node.
 Type=simple
 WorkingDirectory=%h/Projects/paperclip-room
 EnvironmentFile=%h/Projects/paperclip-room/.env

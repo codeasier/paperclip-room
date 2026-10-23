@@ -25,3 +25,9 @@ __pycache__/
 screenshots/
 artifacts/
 .agent/
+
+# Frontend dependencies, build output and test evidence
+node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
