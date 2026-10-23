@@ -220,6 +220,11 @@ def live_run_view(run, issues_by_id):
     context = context if isinstance(context, dict) else {}
     issue_id = run.get("issueId") or context.get("issueId") or context.get("taskId")
     issue = issues_by_id.get(issue_id) if issue_id else None
+    task_key = context.get("taskKey")
+    # 有的运行把内部 issue UUID 当 taskKey 写进来，直接展示会变成一串 UUID
+    if isinstance(task_key, str) and re.fullmatch(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", task_key):
+        task_key = None
     return {
         "id": run.get("id"),
         "status": run.get("status"),
@@ -231,7 +236,7 @@ def live_run_view(run, issues_by_id):
         "issue": issue.get("identifier") if issue else None,
         "issueTitle": issue.get("title") if issue else None,
         # 任务不在当前100条窗口时仍保留唤醒时的编号，方便辨认是对话还是较早任务
-        "taskKey": context.get("taskKey"),
+        "taskKey": task_key,
         "linked": bool(issue),
         # 有 issue 但不在当前任务窗口：通常是隐藏的对话会话或较早的任务
         "unlisted": bool(issue_id and not issue),

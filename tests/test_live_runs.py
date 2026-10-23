@@ -140,6 +140,15 @@ class LiveRunViewTests(unittest.TestCase):
         self.assertFalse(view["linked"])
         self.assertFalse(view["unlisted"])
 
+    def test_uuid_task_key_is_not_shown_to_the_ui(self):
+        run = {"id": "r1", "status": "queued", "issueId": "i1",
+               "contextSnapshot": {"taskKey": "088b0deb-a685-412e-85b2-a168f9aa8298"}}
+        view = server.live_run_view(run, {})
+        self.assertIsNone(view["taskKey"])
+        self.assertTrue(view["unlisted"])
+        human = server.live_run_view({**run, "contextSnapshot": {"taskKey": "HER-99"}}, {})
+        self.assertEqual(human["taskKey"], "HER-99")
+
     def test_no_runs_keeps_empty_snapshot(self):
         data = self.snapshot(runs=[])
         self.assertEqual(data["liveRuns"], 0)

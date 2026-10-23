@@ -892,6 +892,7 @@ function statusChip(status,prefix=''){
    同一个“活跃”在左栏、标题和任务时间线里必须指向同一件事，否则看起来像有任务在跑。 */
 const LIVE_SOURCES = {timer:"定时心跳", on_demand:"手动唤醒", assignment:"任务指派", automation:"自动规则"};
 const LIVE_STATUS = {running:"运行中", queued:"排队中", cancelling:"取消中"};
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function liveInfo(a){
   const live = a && a.live;
   return live && Array.isArray(live.runs) ? live : null;
@@ -902,7 +903,7 @@ function liveSource(run){
 function liveRunLabel(run){
   if(!run) return "运行";
   if(run.issue) return run.issue;
-  if(run.taskKey) return `${run.taskKey} · 未纳入当前任务窗口`;
+  if(run.taskKey && !UUID_RE.test(run.taskKey)) return `${run.taskKey} · 未纳入当前任务窗口`;
   if(run.unlisted) return "对话或较早任务";
   return liveSource(run);
 }

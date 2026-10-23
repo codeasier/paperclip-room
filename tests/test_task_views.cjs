@@ -193,6 +193,8 @@ const assert = require('node:assert/strict');
     assert.equal(await page.evaluate(()=>liveTotalsText({liveTaskRunning:0,liveBackgroundRunning:2,liveQueued:0,liveRuns:2})),'2 个后台运行');
     assert.equal(await page.evaluate(()=>liveTotalsText({liveTaskRunning:1,liveBackgroundRunning:1,liveQueued:1,liveRuns:3})),'1 个任务运行 · 1 个后台运行 · 1 个排队');
     assert.equal(await page.evaluate(()=>liveTotalsText({liveRuns:2})),'2 个活跃运行');
+    assert.equal(await page.evaluate(()=>liveRunLabel({unlisted:true,taskKey:'088b0deb-a685-412e-85b2-a168f9aa8298',source:'assignment'})),'对话或较早任务');
+    assert.equal(await page.evaluate(()=>liveRunLabel({unlisted:true,taskKey:'HER-99',source:'assignment'})),'HER-99 · 未纳入当前任务窗口');
     assert.match(await page.locator('.trace-live').innerText(),/定时心跳/);
     assert.match(await page.locator('.trace-live').innerText(),/未出现在当前时间线/);
     await page.locator('[data-live-run="live-bg"]').click();
