@@ -20,13 +20,14 @@ const assert = require('node:assert/strict');
     });
     await page.goto('http://paperclip.test/');
     await page.evaluate(()=>{
-      selected='pl';names={pl:'PL',qa:'QA'};agents=[{id:'pl',name:'PL'}];
+      selected='pl';names={pl:'PL',qa:'QA'};agents=[{id:'pl',name:'PL',status:'idle',running:0,current:{identifier:'HER-110',title:'待 PL 跟进的评审',status:'in_progress'}}];
       const run=(id,agentId,start,end,status='succeeded')=>({id,agentId,agentName:names[agentId],status,startedAt:start,finishedAt:end});
       const base={relation:'assigned',priority:'medium',status:'in_progress',phase:1,lastActivityAt:'2026-10-22T08:00:00Z',children:{total:0,done:0},comments:{total:0,latest:[]},checklist:null,runs:{total:3,active:0,failed:0},title:'并行任务 <script>unsafe</script>'};
       tasks=[
         {...base,id:'one',identifier:'HER-1',attempts:[run('a','pl','2026-10-22T08:00:00Z','2026-10-22T08:05:00Z'),run('b','pl','2026-10-22T08:02:00Z','2026-10-22T08:04:00Z'),run('c','qa','2026-10-22T08:01:00Z','2026-10-22T08:03:00Z')]},
-        {...base,id:'two',identifier:'HER-2',status:'blocked',attempts:[],runs:{total:0,active:0,failed:0}},
+        {...base,id:'two',identifier:'HER-2',status:'blocked',attempts:[{id:'untimed',agentId:'pl',agentName:'PL',status:'failed'}],runs:{total:1,active:0,failed:1}},
         {...base,id:'three',identifier:'HER-3',status:'done',phase:3,attempts:[{...run('d','pl',null,null,'queued'),createdAt:'2026-10-22T08:03:00Z'}]},
+        {...base,id:'assigned-only',identifier:'HER-110',title:'待 PL 跟进的评审',attempts:[run('qa-cancelled','qa','2026-10-22T08:00:00Z','2026-10-22T08:05:00Z','cancelled')],runs:{total:1,active:0,failed:0}},
       ];
       tasksLoaded=true;tasksAt=Date.now();tasksMeta={groups:{open:2,done:1},note:'有界查询'};
       roomEvents=[
@@ -34,7 +35,7 @@ const assert = require('node:assert/strict');
         {id:'comment',kind:'comment',issueId:'one',issue:'HER-1',issueTitle:'并行任务',text:'给 QA\n请验收',sender:{name:'PL'},recipients:[{name:'QA'}],ts:'2026-10-22T08:01:00Z'},
       ];
       executionRuns=[{id:'a',agentId:'pl',status:'succeeded',issue:'HER-1',issueTitle:'并行任务',ts:'2026-10-22T08:00:00Z',state:'available',nextCursor:20,entries:[{id:'tool',kind:'tool_call',toolCallId:'call',name:'terminal',text:'{"command":"true"}',ts:'2026-10-22T08:02:00Z'},{id:'result',kind:'tool_result',toolCallId:'call',text:'tool-result',ts:'2026-10-22T08:02:10Z'},{id:'m-20',kind:'assistant',text:'当前助手消息',ts:'2026-10-22T08:03:00Z'}]}];
-      executionLoaded=true;renderTimeline();setView('tasks');
+      executionLoaded=true;renderTimeline();setView('tasks');renderHead();
       const intervals=taskIntervals([{...tasks[0],attempts:[run('live','pl','2026-10-22T08:00:00Z',null,'running'),run('missing','pl','2026-10-22T08:00:00Z',null,'failed'),run('bad','pl','2026-10-22T08:05:00Z','2026-10-22T08:00:00Z'),run('invalid','pl','invalid',null)]}],Date.parse('2026-10-22T08:10:00Z'));
       if(intervals.length!==3 || intervals.filter(r=>r.measured).length!==1 || intervals.find(r=>r.run.id==='live').end-intervals.find(r=>r.run.id==='live').start!==600000) throw Error('区间计算错误');
     });
@@ -84,6 +85,32 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('[data-trace-run="c"]').count(),0);
     assert.equal(await page.locator('.trace-bar.queued').count(),1);
     assert.equal(await page.locator('#tasklist script').count(),0);
+    assert.match(await page.locator('#taskcontext').innerText(),/当前名下任务/);
+    assert.match(await page.locator('#taskcontext').innerText(),/任务：进行中/);
+    assert.equal(await page.locator('#roomstatus').innerText(),'待命中');
+    const assignedOnly=page.locator('.trace-unmeasured-task[data-trace-task="assigned-only"]');
+    assert.match(await assignedOnly.innerText(),/暂无 PL 的运行记录/);
+    assert.match(await assignedOnly.innerText(),/QA · 已取消/);
+    assert.equal(await page.locator('[data-trace-run="qa-cancelled"]').count(),0);
+    assert.match(await page.locator('.trace-unmeasured-task[data-trace-task="two"]').innerText(),/已记录 PL 的 1 次运行，但缺少可用时间/);
+    assert.equal(await page.locator('[data-trace-run="untimed"]').count(),0);
+    await assignedOnly.click();
+    assert.match(await page.locator('#detailcontent').innerText(),/暂无 PL 的运行记录/);
+    assert.match(await page.locator('#detailcontent').innerText(),/QA · 已取消/);
+    assert.equal(await page.locator('[data-process-run]').count(),0);
+    await page.locator('#closepanel').click();
+    await page.evaluate(()=>{
+      const task=tasks.find(t=>t.id==='assigned-only');task.attempts[0].status='running';task.runs.active=1;
+      roomEvents.push({id:'assigned-issue',kind:'issue',issueId:task.id,issue:task.identifier,title:task.title,status:task.status,ts:'2026-10-22T08:00:00Z'});
+    });
+    await page.locator('#tasks-filter').selectOption('active');
+    assert.equal(await page.locator('[data-trace-task="assigned-only"]').count(),0);
+    assert.equal(await page.locator('[data-trace-run="d"]').count(),1);
+    await page.locator('#tasks-list-view').click();
+    assert.equal(await page.locator('[data-issue-detail="assigned-only"]').count(),0);
+    await page.evaluate(()=>{roomEvents=roomEvents.filter(e=>e.id!=='assigned-issue');const task=tasks.find(t=>t.id==='assigned-only');task.attempts[0].status='cancelled';task.runs.active=0;});
+    await page.locator('#tasks-filter').selectOption('all');
+    await page.locator('#tasks-trace-view').click();
     await page.locator('[data-trace-run="a"]').click();
     assert.equal(await page.locator('#sidepanel').isVisible(),true);
     assert.match(await page.locator('#detailcontent').innerText(),/运行：a/);
@@ -173,6 +200,6 @@ const assert = require('node:assert/strict');
     await page.evaluate(()=>{tasks=[];tasksMeta.note='非完整历史';renderTasks();});
     assert.match(await page.locator('#tasklist').innerText(),/当前查询范围暂无关联任务/);
     assert.deepEqual(errors,[]);
-    console.log('PASS: historical executed/reassigned task hydration and scoped empty state; collapsed execution rows; sidebar tools/replies, history/pagination/dedup, live updates and scroll/expansion retention; central views, details, filters and 4 viewports');
+    console.log('PASS: task ownership vs member execution, unmeasured task details and member-scoped active filters; historical executed/reassigned task hydration and scoped empty state; collapsed execution rows; sidebar tools/replies, history/pagination/dedup, live updates and scroll/expansion retention; central views, details, filters and 4 viewports');
   }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

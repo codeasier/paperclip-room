@@ -427,6 +427,14 @@ button.trace-label:hover{background:var(--accent-weak)}
 .trace-bar.cancelled{background:#f1f2f5;border-color:#cbd0d7;color:#626c7b}
 .trace-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--ink-3);padding:10px 0}
 .trace-legend span::before{content:'';display:inline-block;width:7px;height:7px;border-radius:2px;background:var(--swatch);margin-right:4px}
+.trace-unmeasured{margin:12px 0;border:1px solid var(--line-2);border-radius:8px;overflow:hidden}
+.trace-unmeasured h4{margin:0;padding:9px 12px;background:var(--rail);font-size:11px;font-weight:500;color:var(--ink-2)}
+.trace-unmeasured-task{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border:0;border-top:1px solid var(--line);background:#fff;text-align:left;color:var(--ink-2);cursor:pointer}
+.trace-unmeasured-task:hover{background:var(--accent-weak)}
+.trace-unmeasured-info{flex:1;min-width:0}
+.trace-unmeasured-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
+.trace-unmeasured-title strong{margin-right:8px}
+.trace-unmeasured-note{display:block;margin-top:4px;font-size:10.5px;line-height:1.5;color:var(--ink-3);overflow-wrap:anywhere}
 .trace-selected{margin-top:12px}
 .trace-selected .task-detail{border:1px solid var(--line);border-radius:8px}
 .trace-selected h4{font-size:12px;margin:8px 0}
@@ -701,7 +709,7 @@ select.model{
           <button type="button" class="view-tab" id="tasks-list-view" aria-pressed="true">列表</button>
           <button type="button" class="view-tab" id="tasks-trace-view" aria-pressed="false">时间线</button>
         </div>
-        <select class="task-filter" id="tasks-filter" aria-label="筛选任务状态"><option value="all">全部状态</option><option value="active">执行中</option><option value="blocked">受阻</option><option value="open">未完成</option><option value="done">已结束</option></select>
+        <select class="task-filter" id="tasks-filter" aria-label="筛选任务状态"><option value="all">全部状态</option><option value="active">成员执行中</option><option value="blocked">受阻</option><option value="open">未完成</option><option value="done">已结束</option></select>
         <input type="search" class="task-search" id="tasks-search" placeholder="搜索任务编号或标题…" aria-label="搜索任务编号或标题">
       </div>
       <div class="stream-notice" id="executionnotice" role="status" hidden></div>
@@ -855,8 +863,8 @@ async function requestJSON(url, options = {}){
 function freshError(a){
   return a.status === "error" && (a.lastRunAgeMin == null || a.lastRunAgeMin < 120);
 }
-function statusChip(status){
-  return `<span class="status-chip ${esc(status)}">${esc(STATUS[status] || status || "待更新")}</span>`;
+function statusChip(status,prefix=''){
+  return `<span class="status-chip ${esc(status)}">${esc(prefix+(STATUS[status] || status || "待更新"))}</span>`;
 }
 
 /* ---------- 极简 Markdown ---------- */
@@ -1157,8 +1165,8 @@ function renderHead(){
   const context = $("#taskcontext");
   context.hidden = !a.current;
   if(a.current){
-    context.innerHTML = `<span class="muted task-caption">当前任务</span><strong>${esc(a.current.identifier)}</strong><span class="task-title">${esc(a.current.title)}</span>${statusChip(a.current.status)}`;
-    context.title = a.current.title;
+    context.innerHTML = `<span class="muted task-caption">当前名下任务</span><strong>${esc(a.current.identifier)}</strong><span class="task-title">${esc(a.current.title)}</span>${statusChip(a.current.status,'任务：')}`;
+    context.title = `${a.current.title}\n这是名下未结任务；任务状态不代表成员正在执行，成员执行状态见上方。`;
   }
   $("#recipient").textContent = `与 ${a.name} 对话`;
   $("#input").placeholder = `给 ${a.name} 发消息，直接开始对话…`;
@@ -1459,7 +1467,7 @@ function taskDetailHTML(t){
   }
   if(t.runs.total){
     const last = t.runs.lastStatus ? (RUN_STATUS[t.runs.lastStatus] || t.runs.lastStatus) : "状态未知";
-    html += `<div class="task-sub">运行</div><div class="task-note">最近 ${esc(last)}${t.runs.lastAt ? ` · ${esc(dayLabel(t.runs.lastAt))} ${esc(hhmm(t.runs.lastAt))}` : ""} · 共 ${t.runs.total} 次${t.runs.failed ? `，失败 ${t.runs.failed} 次` : ""}</div>`;
+    html += `<div class="task-sub">运行（任务内所有成员）</div><div class="task-note">最近 ${esc(last)}${t.runs.lastAt ? ` · ${esc(dayLabel(t.runs.lastAt))} ${esc(hhmm(t.runs.lastAt))}` : ""} · 共 ${t.runs.total} 次${t.runs.failed ? `，失败 ${t.runs.failed} 次` : ""}</div>`;
     if(t.runs.lastError) html += `<div class="task-error">${esc(t.runs.lastError)}</div>`;
   }
   return html + "</div>";
@@ -1493,7 +1501,7 @@ function renderTasks(){
 function filteredTasks(){
   const query = $("#tasks-search").value.trim().toLocaleLowerCase(), filter = $("#tasks-filter").value;
   return tasks.filter(t => (!query || `${t.identifier || ''} ${t.title}`.toLocaleLowerCase().includes(query)) &&
-    (filter === 'all' || filter === 'active' && (taskLayout === 'trace' ? (t.attempts || []).some(r=>r.agentId === selected && ['running','queued','cancelling'].includes(r.status)) : t.runs.active > 0) || filter === 'blocked' && t.status === 'blocked' ||
+    (filter === 'all' || filter === 'active' && (t.attempts || []).some(r=>r.agentId === selected && ['running','queued','cancelling'].includes(r.status)) || filter === 'blocked' && t.status === 'blocked' ||
      filter === 'open' && !['done','cancelled'].includes(t.status) || filter === 'done' && ['done','cancelled'].includes(t.status)));
 }
 function durationLabel(ms){
@@ -1522,6 +1530,13 @@ function traceTime(ts){
   const d = new Date(ts);
   return `${d.getMonth()+1}/${d.getDate()} ${hhmm(d.toISOString())}:${String(d.getSeconds()).padStart(2,'0')}`;
 }
+function taskExecutionNote(task){
+  const attempts=task.attempts || [], name=names[selected] || '当前成员';
+  const own=attempts.filter(r=>r.agentId===selected);
+  if(own.length) return `已记录 ${name} 的 ${own.length} 次运行，但缺少可用时间，无法绘制时间条。`;
+  const latest=attempts.slice().sort((a,b)=>(b.finishedAt || b.startedAt || b.createdAt || '').localeCompare(a.finishedAt || a.startedAt || a.createdAt || ''))[0];
+  return `当前查询范围暂无 ${name} 的运行记录。${latest ? `最近运行记录：${latest.agentName || names[latest.agentId] || '未知成员'} · ${RUN_STATUS[latest.status] || latest.status || '状态未知'}。` : ''}`;
+}
 function taskTraceHTML(items){
   const own = taskIntervals(items).filter(item=>item.run.agentId === selected);
   const windowSize = {'1h':3600000,'6h':21600000,'24h':86400000}[traceRange];
@@ -1529,9 +1544,14 @@ function taskTraceHTML(items){
   const windowEnd = latest + (windowSize ? windowSize*.025 : 0) - (windowSize || 0)*traceOffset;
   const windowStart = windowEnd - (windowSize || 0);
   const intervals = own.filter(r=>!windowSize || r.end>=windowStart && r.start<=windowEnd);
-  const missingCount = items.filter(t=>!own.some(r=>r.task.id===t.id)).length;
+  const missing = items.filter(t=>!own.some(r=>r.task.id===t.id));
   let html = `<div class="trace-tools"><span>${esc(names[selected] || '当前成员')} · 执行时间线</span><span class="grow"></span><select class="task-filter" data-trace-range aria-label="时间线范围">${[['1h','最近活动 1 小时'],['6h','最近活动 6 小时'],['24h','最近活动 24 小时'],['all','全部记录']].map(([value,label])=>`<option value="${value}" ${traceRange===value?'selected':''}>${label}</option>`).join('')}</select><button type="button" data-trace-window="previous" aria-label="前一个时间窗口" ${!windowSize?'disabled':''}>←</button><button type="button" data-trace-window="next" aria-label="后一个时间窗口" ${!windowSize || !traceOffset?'disabled':''}>→</button><button type="button" data-trace-zoom="out" aria-label="缩小时间线">−</button><span>${traceZoom}×</span><button type="button" data-trace-zoom="in" aria-label="放大时间线">＋</button><button type="button" data-trace-zoom="fit">适应</button></div>`;
   if(windowSize) html += `<div class="trace-window">${esc(traceTime(windowStart))} — ${esc(traceTime(windowEnd))} · ${intervals.length}/${own.length} 次运行${traceOffset ? '' : ' · 以最近运行定位'}</div>`;
+  if(missing.length){
+    html+=`<div class="trace-unmeasured"><h4>关联任务 · 无可绘制的 ${esc(names[selected] || '当前成员')} 执行时间（${missing.length}）</h4>`;
+    for(const task of missing) html+=`<button type="button" class="trace-unmeasured-task" data-trace-task="${esc(task.id)}" title="${esc(task.title)}"><span class="trace-unmeasured-info"><span class="trace-unmeasured-title"><strong>${esc(task.identifier || '任务')}</strong>${esc(task.title)}</span><span class="trace-unmeasured-note">${esc(taskExecutionNote(task))}</span></span>${statusChip(task.status,'任务：')}</button>`;
+    html+='</div>';
+  }
   if(intervals.length){
     const min = Math.min(...intervals.map(r=>r.start)), max = Math.max(...intervals.map(r=>r.end));
     const span = Math.max(max-min, 60000), start = windowSize ? windowStart : min-span*.025, extent = windowSize || span*1.05;
@@ -1566,9 +1586,8 @@ function taskTraceHTML(items){
       html += '</div></div>';
     }
     html += '</div></div><div class="trace-legend"><span style="--swatch:#eda95a">执行中（至当前）</span><span style="--swatch:#a0d3b0">成功</span><span style="--swatch:#edafa7">失败 / 超时</span><span style="--swatch:#a2a9b4">排队 / 未知区间为时间点</span></div>';
-  } else html += '<div class="task-note">当前时间窗口没有该成员的运行，可切换时间范围或向前翻页。</div>';
-  if(missingCount) html += `<div class="task-note">${missingCount} 项任务未记录当前成员的执行时间，可在列表中查看任务进展。</div>`;
-  html += `<div class="task-note task-scope">仅显示 ${esc(names[selected] || '当前成员')} 参与执行的运行；点击查看详情。最近活动范围按最后运行时间定位，可向前翻页；全部记录仍受后端查询窗口限制。${esc(tasksMeta.note)}</div>`;
+  } else html += `<div class="task-note">${own.length ? '当前时间窗口没有该成员的运行，可切换时间范围或向前翻页。' : '当前查询范围暂无该成员可绘制的运行；关联任务见上方。'}</div>`;
+  html += `<div class="task-note task-scope">时间条仅表示 ${esc(names[selected] || '当前成员')} 的实际运行；任务状态不代表正在执行。“全部状态”仍按当前成员和所选时间范围展示运行。最近活动范围按最后运行时间定位，可向前翻页；全部记录仍受后端查询窗口限制。${esc(tasksMeta.note)}</div>`;
   return html;
 }
 function setTaskLayout(layout){
@@ -1901,9 +1920,9 @@ function renderDetail(){
     const signature=JSON.stringify([target,task,issueEvent,attempt,run,detailRunLoading.has(target.runId),detailRunErrors.get(target.runId),moreLoading.has(target.runId)]);
     if(signature===detailSignature) return;
     const key=JSON.stringify(target), same=$('#detailcontent').dataset.event===key, scroll=same ? $('#detailpane').scrollTop : 0;
-    let html=`<article class="comm-detail"><div class="output-label">${target.runId ? '运行与任务详情' : '任务详情'}</div><h3>${esc(task?.identifier || issueEvent?.issue || run?.issue || target.issue || '任务')} · ${esc(task?.title || issueEvent?.title || run?.issueTitle || '任务信息')}</h3>${statusChip(task?.status || issueEvent?.status)}</article>`;
+    let html=`<article class="comm-detail"><div class="output-label">${target.runId ? '运行与任务详情' : '任务详情'}</div><h3>${esc(task?.identifier || issueEvent?.issue || run?.issue || target.issue || '任务')} · ${esc(task?.title || issueEvent?.title || run?.issueTitle || '任务信息')}</h3>${statusChip(task?.status || issueEvent?.status,'任务：')}</article>`;
     if(attempt) html+=`<div class="comm-detail"><strong>${esc(attempt.agentName || names[attempt.agentId] || '未知成员')} · ${esc(RUN_STATUS[attempt.status] || attempt.status)}</strong><div class="task-facts">开始：${esc(attempt.startedAt ? traceTime(Date.parse(attempt.startedAt)) : '尚未开始 / 未记录')}<br>结束：${esc(attempt.finishedAt ? traceTime(Date.parse(attempt.finishedAt)) : ['running','cancelling'].includes(attempt.status) ? '执行中' : '未记录')}<br>运行：${esc(attempt.id)}</div></div>`;
-    html+=run ? executionBodyHTML(run) : target.runId ? `<div class="comm-detail task-note">${detailRunErrors.has(target.runId) ? `${esc(detailRunErrors.get(target.runId))}<button type="button" class="text-button" data-run-retry="${esc(target.runId)}">重试</button>` : '正在读取工具调用与助手消息…'}</div>` : '<div class="comm-detail task-note">当前查询窗口暂无该成员的执行过程。</div>';
+    html+=run ? executionBodyHTML(run) : target.runId ? `<div class="comm-detail task-note">${detailRunErrors.has(target.runId) ? `${esc(detailRunErrors.get(target.runId))}<button type="button" class="text-button" data-run-retry="${esc(target.runId)}">重试</button>` : '正在读取工具调用与助手消息…'}</div>` : `<div class="comm-detail task-note">${task ? esc(taskExecutionNote(task)) : '当前查询窗口暂无该成员的执行过程。'}</div>`;
     html+=task ? taskDetailHTML(task) : '<div class="comm-detail task-note">该任务不在当前任务详情查询窗口内；这里只显示已获取的记录。</div>';
     $('#detailcontent').innerHTML=html;
     bindToolDetails($('#detailcontent'));
@@ -2024,7 +2043,7 @@ function renderEvents(events){
   events=events.filter(ev=>{
     const task=tasks.find(t=>t.id===ev.issueId || t.identifier===ev.issue);
     const status=ev.kind==='issue' ? ev.status : task?.status;
-    const active=ev.kind==='execution' ? ['running','queued','cancelling'].includes(ev.status) : task?.runs?.active;
+    const active=ev.kind==='execution' ? ['running','queued','cancelling'].includes(ev.status) : (task?.attempts || []).some(r=>r.agentId===selected && ['running','queued','cancelling'].includes(r.status));
     return (!query || `${ev.issue || ''} ${ev.issueTitle || ev.title || ''}`.toLocaleLowerCase().includes(query)) &&
       (filter==='all' || filter==='active' && active || filter==='blocked' && status==='blocked' || filter==='open' && status && !['done','cancelled'].includes(status) || filter==='done' && ['done','cancelled'].includes(status));
   });
