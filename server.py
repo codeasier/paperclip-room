@@ -1059,6 +1059,221 @@ def set_model(agent_id, model):
     return {"ok": False, "error": f"HTTP {st2}: {json.dumps(d2, ensure_ascii=False)[:200]}"}
 
 
+# ---------------------------------------------------------------- 巡检
+
+OPS_STALE_MINUTES = 30
+OPS_RECENT_HOURS = 24
+OPS_ISSUE_LIMIT = 5000
+OPS_RUN_LIMIT = 2000
+
+
+def _epoch(value):
+    """ISO 时间转 epoch；脏数据返回 None，不让整页巡检失败。"""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_all_issues(company):
+    st, data = call("GET", f"/api/companies/{company}/issues?limit={OPS_ISSUE_LIMIT}")
+    return as_list(data, "issues") if st == 200 else []
+
+
+def fetch_issue_interactions(issue_id):
+    st, data = call("GET", f"/api/issues/{issue_id}/interactions")
+    return as_list(data, "interactions") if st == 200 else []
+
+
+def fetch_all_runs(company):
+    st, data = call("GET", f"/api/companies/{company}/heartbeat-runs?limit={OPS_RUN_LIMIT}")
+    return as_list(data, "runs") if st == 200 else []
+
+
+def _owner_label(owner, names):
+    if owner == "board":
+        return "用户"
+    if isinstance(owner, dict):
+        if owner.get("agentId"):
+            return names.get(owner["agentId"]) or owner["agentId"][:8]
+        if owner.get("userId"):
+            return "用户"
+    return "未登记"
+
+
+def ops_payload(company):
+    """运维巡检：状态真实性、阻塞时长、近期失败率。只读聚合，不改任何状态。"""
+    issues = cached("ops:issues:" + company, 20.0, lambda: fetch_all_issues(company))
+    runs = cached("ops:runs:" + company, 20.0, lambda: fetch_all_runs(company))
+    names = {a.get("id"): a.get("name") for a in agents_for(company)}
+    now = time.time()
+
+    status_counts = {}
+    for issue in issues:
+        key = issue.get("status") or "unknown"
+        status_counts[key] = status_counts.get(key, 0) + 1
+
+    active = set()
+    runs_by_issue = {}
+    for run in runs:
+        issue_id = (run.get("contextSnapshot") or {}).get("issueId")
+        if not issue_id:
+            continue
+        runs_by_issue[issue_id] = runs_by_issue.get(issue_id, 0) + 1
+        if run.get("status") in ("running", "queued"):
+            active.add(issue_id)
+
+    # 状态真实性：in_progress 但没有任何活着的 run，且超出静默阈值或本来就没指派。
+    stale = []
+    for issue in issues:
+        if issue.get("status") != "in_progress" or issue.get("id") in active:
+            continue
+        last = _epoch(issue.get("lastActivityAt")) or _epoch(issue.get("updatedAt"))
+        idle = (now - last) / 60 if last else None
+        if issue.get("assigneeAgentId") and idle is not None and idle < OPS_STALE_MINUTES:
+            continue
+        stale.append({
+            "id": issue.get("id"),
+            "identifier": issue.get("identifier"),
+            "title": issue.get("title"),
+            "owner": names.get(issue.get("assigneeAgentId")) or "未指派",
+            "idleMinutes": round(idle, 1) if idle is not None else None,
+            "runs": runs_by_issue.get(issue.get("id"), 0),
+        })
+    stale.sort(key=lambda item: -(item["idleMinutes"] or 0))
+
+    # 区分“等用户回答”和“真的没人管”：有 pending 交互的不算陈旧，交互过期的单独标注。
+    awaiting = []
+    for item in list(stale)[:12]:
+        interactions = cached("ops:interactions:" + item["id"], 20.0,
+                              lambda iid=item["id"]: fetch_issue_interactions(iid))
+        latest = None
+        for it in interactions:
+            if it.get("status") in ("pending", "expired"):
+                if latest is None or (it.get("createdAt") or "") > (latest.get("createdAt") or ""):
+                    latest = it
+        if not latest:
+            continue
+        prompt = ""
+        questions = (latest.get("payload") or {}).get("questions") or []
+        if questions and isinstance(questions[0], dict):
+            prompt = questions[0].get("prompt") or ""
+        if latest.get("status") == "pending":
+            stale.remove(item)
+            awaiting.append({
+                "identifier": item["identifier"],
+                "title": item["title"],
+                "owner": item["owner"],
+                "prompt": prompt[:160],
+                "idleMinutes": item["idleMinutes"],
+            })
+        else:
+            item["interaction"] = "expired"
+    for item in stale:
+        item.pop("id", None)
+    stale.sort(key=lambda item: -(item["idleMinutes"] or 0))
+    awaiting.sort(key=lambda item: -(item["idleMinutes"] or 0))
+
+    blocked = []
+    for issue in issues:
+        if issue.get("status") != "blocked":
+            continue
+        since = _epoch(issue.get("blockedTransitionAt")) or _epoch(issue.get("updatedAt"))
+        descriptor = issue.get("unblockDescriptor") or {}
+        attention = issue.get("blockerAttention") or {}
+        owner = descriptor.get("owner")
+        last = _epoch(issue.get("lastActivityAt"))
+        blocked.append({
+            "identifier": issue.get("identifier"),
+            "title": issue.get("title"),
+            "owner": names.get(issue.get("assigneeAgentId")) or "未指派",
+            "waitingOn": _owner_label(owner, names),
+            "action": descriptor.get("action"),
+            "ageHours": round((now - since) / 3600, 1) if since else None,
+            "silentHours": round((now - last) / 3600, 1) if last else None,
+            "attention": attention.get("state"),
+            "reason": attention.get("reason"),
+            "onBoard": owner == "board" or (isinstance(owner, dict) and bool(owner.get("userId"))),
+        })
+    blocked.sort(key=lambda item: -(item["ageHours"] or 0))
+
+    run_counts = {}
+    for run in runs:
+        key = run.get("status") or "unknown"
+        run_counts[key] = run_counts.get(key, 0) + 1
+    recent_failed = recent_timeout = 0
+    for run in runs:
+        created = _epoch(run.get("createdAt"))
+        if not created or now - created > OPS_RECENT_HOURS * 3600:
+            continue
+        if run.get("status") == "failed":
+            recent_failed += 1
+        elif run.get("status") == "timed_out":
+            recent_timeout += 1
+
+    # 配置预检：启动即失败的坑（命令路径、模型、超时档位、成员状态）在巡检里提前暴露。
+    preflight = []
+    for agent in agents_for(company):
+        if agent.get("status") == "paused":
+            continue  # 刻意暂停的成员不参与预检，避免长期噪声
+        cfg = agent.get("adapterConfig") or {}
+        label = agent.get("name") or agent.get("id", "")[:8]
+        if cfg.get("hermesCommand") and not os.path.exists(cfg["hermesCommand"]):
+            preflight.append({"agent": label, "code": "command_missing",
+                              "detail": f"hermesCommand 不存在：{cfg['hermesCommand']}"})
+        if not cfg.get("model"):
+            preflight.append({"agent": label, "code": "model_missing", "detail": "未配置模型"})
+        if cfg.get("timeoutSec") and cfg["timeoutSec"] < 1200:
+            preflight.append({"agent": label, "code": "timeout_low",
+                              "detail": f"timeoutSec={cfg['timeoutSec']}s，低于建议下限 1200s"})
+        if agent.get("status") == "error":
+            preflight.append({"agent": label, "code": "agent_error",
+                              "detail": agent.get("errorReason") or "成员处于 error 状态"})
+
+    on_board = [item for item in blocked if item["onBoard"]]
+    longest = max((item.get("silentHours") or 0 for item in on_board), default=0)
+    alerts = []
+    if on_board:
+        alerts.append({"level": "warn", "code": "board_gate",
+                       "message": f"{len(on_board)} 个任务在等你授权或拍板，最长静默 {longest:.1f}h"})
+    if awaiting:
+        alerts.append({"level": "warn", "code": "awaiting_answer",
+                       "message": f"{len(awaiting)} 个任务在等你回答问题"})
+    if stale:
+        alerts.append({"level": "warn", "code": "stale_status",
+                       "message": f"{len(stale)} 个 in_progress 任务没有活跃运行"})
+    if recent_timeout > 2:
+        alerts.append({"level": "warn", "code": "timeouts",
+                       "message": f"近 {OPS_RECENT_HOURS}h 超时 {recent_timeout} 次"})
+    if recent_failed:
+        alerts.append({"level": "warn", "code": "failures",
+                       "message": f"近 {OPS_RECENT_HOURS}h 适配器失败 {recent_failed} 次"})
+    if preflight:
+        alerts.append({"level": "warn", "code": "preflight",
+                       "message": f"{len(preflight)} 个成员配置有问题（路径/模型/超时/状态）"})
+
+    return {
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "tasks": {"total": len(issues), "byStatus": status_counts, "stale": stale[:20],
+                  "awaiting": awaiting[:20]},
+        "blocked": {
+            "count": len(blocked),
+            "over24h": sum(1 for item in blocked if (item["ageHours"] or 0) > 24),
+            "onBoard": len(on_board),
+            "items": blocked[:20],
+        },
+        "runs": {
+            "total": len(runs),
+            "byStatus": run_counts,
+            "recent": {"hours": OPS_RECENT_HOURS, "failed": recent_failed, "timedOut": recent_timeout},
+        },
+        "preflight": preflight[:20],
+        "alerts": alerts,
+    }
+
+
 # ---------------------------------------------------------------- HTTP 层
 
 class Handler(BaseHTTPRequestHandler):
@@ -1112,6 +1327,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "team not found"})
             try:
                 return self._send(200, agent_snapshot(company))
+            except Exception as e:
+                return self._send(500, {"error": str(e)})
+
+        if p == "/api/ops":
+            company = self._company(query)
+            if not company:
+                return self._send(404, {"error": "team not found"})
+            try:
+                return self._send(200, cached("ops:" + company, 15.0,
+                                               lambda: ops_payload(company)))
             except Exception as e:
                 return self._send(500, {"error": str(e)})
 

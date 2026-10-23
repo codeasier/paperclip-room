@@ -6,6 +6,7 @@
 
 ## 功能
 
+- 顶栏「巡检」入口：聚合等你处理/等你回答、阻塞时长、没有活跃运行的 in_progress，以及近 24h 的超时与适配器失败；只读，不改任何任务状态。
 - 顶栏团队选择器：列出 token 可见的 Paperclip 公司（团队），切换后重新加载成员、任务与消息；选择保存在当前浏览器。
 - 成员列表、职责、当前任务、运行与错误状态；默认优先选择 PL。
 - 中央「任务」区支持「列表 / 时间线」直接替换：列表中的任务消息与执行记录默认收缩成行，时间线聚焦当前成员的真实运行区间，默认展示最近活动一小时；支持时间范围、翻页、缩放、搜索与状态筛选。
@@ -180,6 +181,16 @@ make check
 systemctl --user restart paperclip-room
 ```
 
+可选：每 30 分钟跑一次巡检并把指标落成时序日志（`ops/slo.py`，写入 `logs/slo.jsonl`，告警进 journal）：
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp deploy/paperclip-slo.service deploy/paperclip-slo.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now paperclip-slo.timer
+journalctl --user -u paperclip-slo.service -n 20 --no-pager
+```
+
 macOS 可以直接在终端运行；仓库的 systemd 模板仅适用于 Linux。
 
 ## 测试与开发
@@ -202,7 +213,10 @@ paperclip-room/
 ├── Makefile                     # run / test / check
 ├── deploy/paperclip-room.service # Linux 用户服务模板
 ├── tests/                       # 离线自动测试
-└── docs/architecture.md         # 数据来源、接口、查询边界与维护说明
+├── docs/architecture.md         # 数据来源、接口、查询边界与维护说明
+├── docs/ops-hardening.md        # 一次任务异常盘点的根因与加固记录
+├── ops/slo.py                   # 定时巡检：/api/ops → logs/slo.jsonl
+└── deploy/paperclip-slo.*       # 巡检 timer 模板
 ```
 
 品牌名称、顶栏头像首字母和页面标题来自所选团队，不再硬编码。`ROLES` 只用于 Hermes 预设角色的中文短标签与排序；不在预设中的成员按 Paperclip `title` 显示，头像使用名称首字母。`MODELS` 是推荐模型列表，仍会合并成员当前模型；收件人别名在 `server.py` 的 `ROLE_ALIASES` 中维护。
@@ -222,4 +236,4 @@ paperclip-room/
 | 局域网无法访问 | `HOST` 是否设为 `0.0.0.0`，监听端口和机器网络是否可达 |
 | 模型修改失败 | token 写入权限，以及对应适配器是否支持所选模型 |
 
-更多数据来源与限制见 [架构说明](docs/architecture.md)。
+更多数据来源与限制见 [架构说明](docs/architecture.md)，一次异常盘点的根因与加固记录见 [ops-hardening](docs/ops-hardening.md)。

@@ -24,6 +24,7 @@ Python ThreadingHTTPServer (server.py)
 | GET | `/`、`/index.html` | 静态页面，按请求读盘 |
 | GET | `/api/teams` | 当前 token 可见的 active 团队（Paperclip 公司），含默认团队标记 |
 | GET | `/api/state?company=<id>` | 指定团队成员、当前任务、活跃运行与模型快照；活跃运行区分任务运行/后台运行及运行中/排队 |
+| GET | `/api/ops?company=<id>` | 只读巡检：等你处理/等你回答、阻塞时长、陈旧 in_progress、近 24h 超时与失败 |
 | GET | `/api/chat?company=<id>&agent=<id>` | 当前 board 用户与该成员的 Agent Chat 会话与消息 |
 | POST | `/api/chat?company=<id>` | JSON `{ "agentId": "…", "text": "…" }`；发送 Agent Chat 消息，必要时自动创建会话 |
 | GET | `/api/tasks?company=<id>&agent=<id>` | 成员名下未结/最近完成、近期参与讨论及有界窗口内实际执行过的任务；含检查项、运行与讨论摘要 |
@@ -85,10 +86,24 @@ Agent Chat 需要实例 Experimental 设置中的 `enableAgentChat` 已开启，
 - `/api/state` 的 `live` 把每条 `running/queued` 运行按是否落在当前任务窗口内分为任务运行与后台运行，并分别给出运行中/排队数量；左栏、标题和顶栏共用这份口径，不再把后台心跳写成“活跃”或“执行中”。任务时间线把未出现在当前时间线中的运行单列（含状态、开始时间/已运行时长、查看运行入口），但不为它们合成任务条。
 - 任务时间线只展示最近100个任务内的运行；Agent Chat 会话运行不属于任务，会被排除，避免在时间线上出现 UUID 标题的运行卡；这类运行只作为后台运行提示出现。
 - 评论时间线扫描最近6个名下任务与12个其他任务，输出最近160个事件，不是全历史。
+- 巡检取最近5000个任务与2000次运行；被隐藏/删除的任务与超出窗口的运行不计入。交互只在陈旧候选（最多12条）上逐条读取。
 - 接收对象只依据评论首行明确指向；未指定对象的消息显示实际任务讨论区。
 - 回执查询最近至多200条heartbeat runs，缓存4秒，以评论ID与任务ID双重精确匹配唤醒上下文。未查到不等于无人接收，运行成功不等于逐条已读或业务验收。
 - 会话最近4次运行，每次默认最近60条原始助手/工具消息；运行中读取取决于Hermes写入数据库的时机，非逐token流式输出。
 - 部分任务评论有20秒缓存，可能比8秒UI轮询稍晚出现。
+
+## 巡检
+
+`/api/ops` 只读聚合，不修改任何任务或运行状态；页面顶栏「巡检」每 30 秒刷新，`ops/slo.py` 可定时拉取同一接口。
+
+- **数据窗口**：issues `limit=5000`、heartbeat-runs `limit=2000`，结果缓存 15 秒；成员列表复用 4 秒缓存。
+- **等你处理**：`blocked` 且 `unblockDescriptor.owner` 为 `board` 或带 `userId` 的任务，按阻塞时长倒序，同时给出「静默时长」（距 `lastActivityAt`）。
+- **等你回答**：`in_progress` 且没有 `running/queued` 运行、但有 `pending` 交互（`ask_user_questions` 等）的任务；交互已 `expired` 的不算等你回答，按陈旧单列（最多检查 12 条任务）。
+- **陈旧 in_progress**：没有活跃运行，且（未指派 或 距最后活动超过 30 分钟）。只统计平台返回的 in_progress，不推断历史。
+- **近 24h 异常**：`failed` / `timed_out` 运行按 `createdAt` 落在窗口内计数。
+- **配置预检**：对未暂停成员检查 `hermesCommand` 是否存在、是否配置模型、`timeoutSec` 是否低于 1200s、成员是否处于 `error`；只读，不修改配置。
+- **告警**：`board_gate`、`awaiting_answer`、`stale_status`、`timeouts`（>2）、`failures`（>0）、`preflight`（配置有问题）。
+- **边界**：这是“当前 board 视角”的巡检，不是全历史审计；被平台隐藏或删除的 issue 不会出现，超过 limit 的历史运行不计入。
 
 ## 前端状态
 

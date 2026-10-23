@@ -1,0 +1,10 @@
+[Unit]
+Description=Paperclip Room SLO check
+After=paperclip-room.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Projects/paperclip-room
+EnvironmentFile=%h/Projects/paperclip-room/.env
+Environment=ROOM_URL=http://127.0.0.1:3200
+ExecStart=/usr/bin/env python3 %h/Projects/paperclip-room/ops/slo.py

@@ -234,6 +234,27 @@ section{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .btn-primary:hover{background:#ad440f}
 .btn-primary:disabled{opacity:.4;cursor:default}
 .modal-note{font-size:10.5px;color:var(--ink-3);margin-top:-4px}
+.modal.wide{width:min(760px,100%)}
+.ops-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-2);background:#fff;color:var(--ink-2);border-radius:999px;padding:4px 10px;font-size:11.5px;cursor:pointer;white-space:nowrap}
+.ops-chip:hover{background:var(--rail)}
+.ops-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
+.ops-chip.warn{border-color:#f3c9a9;background:var(--accent-weak);color:var(--accent)}
+.ops-chip.warn .dot{background:var(--accent)}
+.ops-body{display:flex;flex-direction:column;gap:14px;margin-top:12px;font-size:12px}
+.ops-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.ops-stat{border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:var(--rail)}
+.ops-stat b{display:block;font-size:19px;line-height:1.2;color:var(--ink)}
+.ops-stat span{font-size:10.5px;color:var(--ink-3)}
+.ops-stat.warn b{color:var(--accent)}
+.ops-section h4{margin:0 0 6px;font-size:11px;font-weight:650;color:var(--ink-2);text-transform:none}
+.ops-list{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow:auto}
+.ops-row{border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:#fff}
+.ops-row .t{display:flex;align-items:baseline;gap:8px;min-width:0}
+.ops-row .t code{font-size:11px;color:var(--accent);background:var(--accent-weak);border-radius:5px;padding:1px 5px;flex:none}
+.ops-row .t strong{font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ops-row .m{color:var(--ink-3);font-size:10.5px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.ops-empty{color:var(--ink-3);font-size:11.5px;padding:6px 2px}
+@media (max-width:760px){.ops-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .stream-wrap{position:relative;display:flex;flex:1;min-height:0}
 .stream-notice{padding:7px 20px;background:#fff8ed;color:#965312;font-size:12px;text-align:center}
 .text-button{background:none;border:0;cursor:pointer;color:inherit;text-decoration:underline;text-underline-offset:3px;padding:5px 8px}
@@ -659,6 +680,7 @@ select.model{
   </div>
   <div class="grow"></div>
   <span class="sync-label" id="sync">正在连接</span>
+  <button class="ops-chip" id="opschip" type="button" hidden aria-haspopup="dialog" aria-controls="opsmodal"><span class="dot"></span><span id="opstext">巡检</span></button>
   <div class="live idle" id="live" role="status"><span class="pulse"></span><span id="livetext">连接中</span></div>
 </header>
 
@@ -782,6 +804,16 @@ select.model{
         <button type="submit" class="btn-primary" id="tasksubmit">创建任务</button>
       </div>
     </form>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="opsmodal" hidden>
+  <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="opsmodaltitle">
+    <div class="modal-head">
+      <h3 id="opsmodaltitle">团队巡检</h3>
+      <button type="button" class="modal-close" id="opsclose" aria-label="关闭巡检">×</button>
+    </div>
+    <div class="ops-body" id="opsbody"></div>
   </div>
 </div>
 
@@ -1172,6 +1204,7 @@ function resetTeamView(){
   $("#livetext").textContent = "正在切换";
   setView("chat");
   refreshState();
+  opsData = null; opsBusy = false; $("#opsmodal").hidden = true; renderOpsChip(); loadOps();
 }
 function switchTeam(id){
   if(!id || id === teamId) return;
@@ -2324,12 +2357,74 @@ async function doSend(){
 }
 $("#send").onclick = doSend;
 
+/* ---------- 巡检 ----------
+   只读聚合：阻塞时长、陈旧的 in_progress、近期超时/失败。不改任何任务状态。 */
+let opsData = null, opsBusy = false;
+async function loadOps(){
+  if(opsBusy || !teamId) return;
+  opsBusy = true;
+  try{
+    const d = await requestJSON("/api/ops");
+    if(!d || !d.tasks) return;
+    opsData = d;
+    renderOpsChip();
+    if(!$("#opsmodal").hidden) renderOpsModal();
+  }catch(e){ /* 保留上次成功结果，避免巡检抖动盖掉已知问题 */ }
+  finally{ opsBusy = false; }
+}
+function renderOpsChip(){
+  const chip = $("#opschip");
+  if(!opsData){ chip.hidden = true; return; }
+  const n = (opsData.alerts || []).length;
+  chip.hidden = false;
+  chip.classList.toggle("warn", n > 0);
+  $("#opstext").textContent = n ? `巡检 ${n} 项` : "巡检正常";
+  chip.title = n ? opsData.alerts.map(a => a.message).join("\n") : "阻塞、陈旧状态与近期失败均在阈值内";
+}
+function renderOpsModal(){
+  const body = $("#opsbody");
+  if(!opsData){ body.innerHTML = '<div class="ops-empty">正在读取…</div>'; return; }
+  const t = opsData.tasks || {}, b = opsData.blocked || {}, r = opsData.runs || {}, recent = r.recent || {};
+  const bad = (recent.failed || 0) + (recent.timedOut || 0);
+  const stats = [
+    {label:"任务总数", value:t.total ?? "—"},
+    {label:"阻塞", value:b.count ?? 0, warn:(b.count||0)>0, hint:`超 24h ${b.over24h||0}`},
+    {label:"陈旧 in_progress", value:(t.stale||[]).length, warn:(t.stale||[]).length>0},
+    {label:`近 ${recent.hours||24}h 异常`, value:bad, warn:bad>0, hint:`超时 ${recent.timedOut||0} · 失败 ${recent.failed||0}`},
+  ].map(s => `<div class="ops-stat${s.warn?" warn":""}"><b>${esc(s.value)}</b><span>${esc(s.label)}${s.hint ? " · " + esc(s.hint) : ""}</span></div>`).join("");
+  const rows = (items, fn) => items.length ? items.map(fn).join("") : '<div class="ops-empty">无</div>';
+  const blocked = b.items || [];
+  const board = blocked.filter(i => i.onBoard), others = blocked.filter(i => !i.onBoard);
+  const stale = t.stale || [], awaiting = t.awaiting || [];
+  body.innerHTML = `
+    <div class="ops-grid">${stats}</div>
+    <div class="ops-section"><h4>等你处理（${board.length}）</h4><div class="ops-list">${rows(board, i => `
+      <div class="ops-row"><div class="t"><code>${esc(i.identifier)}</code><strong>${esc(i.title)}</strong></div>
+      <div class="m">${esc((i.action || "").slice(0, 180) || "未写解除条件")} · 阻塞 ${esc(i.ageHours ?? "?")}h${i.silentHours != null ? " · 静默 " + esc(i.silentHours) + "h" : ""}</div></div>`)}</div></div>
+    <div class="ops-section"><h4>等你回答（${awaiting.length}）</h4><div class="ops-list">${rows(awaiting, i => `
+      <div class="ops-row"><div class="t"><code>${esc(i.identifier)}</code><strong>${esc(i.title)}</strong></div>
+      <div class="m">${esc(i.prompt || "交互待回答")} · 静默 ${esc(Math.round(i.idleMinutes ?? 0))} 分钟</div></div>`)}</div></div>
+    <div class="ops-section"><h4>其他阻塞（${others.length}）</h4><div class="ops-list">${rows(others, i => `
+      <div class="ops-row"><div class="t"><code>${esc(i.identifier)}</code><strong>${esc(i.title)}</strong></div>
+      <div class="m">等 ${esc(i.waitingOn)} · ${esc((i.action || "").slice(0, 150) || "未写解除条件")} · 阻塞 ${esc(i.ageHours ?? "?")}h${i.silentHours != null ? " · 静默 " + esc(i.silentHours) + "h" : ""}</div></div>`)}</div></div>
+    <div class="ops-section"><h4>陈旧 in_progress（${stale.length}）</h4><div class="ops-list">${rows(stale, i => `
+      <div class="ops-row"><div class="t"><code>${esc(i.identifier)}</code><strong>${esc(i.title)}</strong></div>
+      <div class="m">${esc(i.owner)}${i.idleMinutes != null ? " · 静默 " + esc(Math.round(i.idleMinutes)) + " 分钟" : ""}</div></div>`)}</div></div>
+    <div class="ops-section"><h4>配置预检（${(opsData.preflight || []).length}）</h4><div class="ops-list">${rows(opsData.preflight || [], i => `
+      <div class="ops-row"><div class="t"><strong>${esc(i.agent)}</strong></div><div class="m">${esc(i.detail)}</div></div>`)}</div></div>
+    <div class="ops-section"><h4>告警</h4><div class="ops-list">${rows(opsData.alerts || [], a => `<div class="ops-row"><div class="m">${esc(a.message)}</div></div>`)}</div></div>`;
+}
+$("#opschip").onclick = () => { $("#opsmodal").hidden = false; renderOpsModal(); loadOps(); };
+$("#opsclose").onclick = () => { $("#opsmodal").hidden = true; };
+$("#opsmodal").onclick = e => { if(e.target.id === "opsmodal") $("#opsmodal").hidden = true; };
+
 function startTimers(){
   setInterval(() => { if(!document.hidden) refreshState(); }, 5000);
   setInterval(() => { if(!document.hidden) loadRoom(); }, 8000);
   setInterval(() => { if(!document.hidden) loadExecution(); }, 8000);
   setInterval(() => { if(!document.hidden && (view === 'tasks' || panelOpen)) loadTasks(); }, 8000);
   setInterval(() => { if(!document.hidden && view === "chat" && chatState !== "disabled" && chatState !== "empty") loadChat(); }, 4000);
+  setInterval(() => { if(!document.hidden) loadOps(); }, 30000);
   document.addEventListener("visibilitychange", () => {
     if(!document.hidden){
       refreshState();
@@ -2337,12 +2432,14 @@ function startTimers(){
       loadExecution();
       if(view === "chat") loadChat();
       if(view === 'tasks' || panelOpen) loadTasks();
+      loadOps();
     }
   });
 }
 async function boot(){
   await loadTeams();
   refreshState();
+  loadOps();
   startTimers();
 }
 boot();

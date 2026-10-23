@@ -1,0 +1,10 @@
+[Unit]
+Description=Paperclip Room SLO check every 30 minutes
+
+[Timer]
+OnCalendar=*:0/30
+Persistent=true
+Unit=paperclip-slo.service
+
+[Install]
+WantedBy=timers.target
