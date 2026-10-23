@@ -72,9 +72,13 @@ header .grow{flex:1}
 .live{
   display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-2);
   padding:4px 10px;border:1px solid var(--line-2);border-radius:99px;background:#fff;
+  white-space:nowrap;min-width:0;max-width:min(64vw,420px);
 }
+#livetext{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .live .pulse{width:6px;height:6px;border-radius:50%;background:var(--ok)}
 .live.idle .pulse{background:#c9ccd2}
+.live.background .pulse{background:#5b8db8}
+.live.queued .pulse{background:#e0a23c}
 .live.offline{color:#a34318;background:#fff7ed;border-color:#fed7aa}
 .live.offline .pulse{background:#d97706}
 
@@ -114,6 +118,8 @@ aside{
 }
 .agent.sel .ava .ring{border-color:#fff}
 .agent .ava .ring.running{background:var(--ok)}
+.agent .ava .ring.live{background:#5b8db8}
+.agent .ava .ring.queued{background:#e0a23c}
 .agent .ava .ring.error{background:var(--err)}
 .agent .ava .ring.idle{background:#c9ccd2}
 .agent .body{min-width:0;flex:1}
@@ -136,6 +142,8 @@ aside{
   background:#eef0f3;color:var(--ink-2);line-height:15px;
 }
 .tag.run{background:var(--accent-weak);color:var(--accent)}
+.tag.bg{background:#eef4fb;color:#35668f}
+.tag.queue{background:#fff6e8;color:#8a5a12}
 .tag.err{background:#fdecec;color:var(--err)}
 
 /* ---------------- 右栏 ---------------- */
@@ -158,6 +166,8 @@ section{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .room-head .meta{font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .room-status{font-size:11px;padding:3px 9px;border-radius:6px;background:var(--rail);color:var(--ink-2);white-space:nowrap}
 .room-status.running{background:#edf8f1;color:#237845}
+.room-status.live{background:#eef4fb;color:#35668f}
+.room-status.queued{background:#fff6e8;color:#8a5a12}
 .room-status.error{background:#fff0ee;color:#b42318}
 .panel-toggle{
   display:inline-flex;align-items:center;gap:6px;flex:none;
@@ -435,6 +445,16 @@ button.trace-label:hover{background:var(--accent-weak)}
 .trace-unmeasured-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
 .trace-unmeasured-title strong{margin-right:8px}
 .trace-unmeasured-note{display:block;margin-top:4px;font-size:10.5px;line-height:1.5;color:var(--ink-3);overflow-wrap:anywhere}
+.trace-live{margin:12px 0;border:1px solid #f0d8c4;border-radius:8px;overflow:hidden;background:#fffdfa}
+.trace-live h4{margin:0;padding:9px 12px;background:#fff7ef;font-size:11px;font-weight:500;color:#8a5a2b}
+.trace-live-row{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid #f7e8db;font-size:11px;color:var(--ink-2);flex-wrap:wrap}
+.trace-live-name{font-weight:600;color:var(--ink)}
+.trace-live-meta{color:var(--ink-3)}
+.trace-live-row .text-button{margin-left:auto;font-size:10.5px;padding:2px 4px}
+.trace-live-note{margin:0;padding:0 12px 9px;font-size:10.5px;line-height:1.55;color:var(--ink-3);overflow-wrap:anywhere}
+.live-dot{width:7px;height:7px;border-radius:50%;background:#5b8db8;flex:none}
+.live-dot.running{background:#2f9e5f}
+.live-dot.queued{background:#e0a23c}
 .trace-selected{margin-top:12px}
 .trace-selected .task-detail{border:1px solid var(--line);border-radius:8px}
 .trace-selected h4{font-size:12px;margin:8px 0}
@@ -867,6 +887,101 @@ function statusChip(status,prefix=''){
   return `<span class="status-chip ${esc(status)}">${esc(prefix+(STATUS[status] || status || "待更新"))}</span>`;
 }
 
+/* ---------- 运行状态 ----------
+   heartbeat-runs 不只包含任务运行：定时心跳、对话唤醒和隐藏会话也会留下 run。
+   同一个“活跃”在左栏、标题和任务时间线里必须指向同一件事，否则看起来像有任务在跑。 */
+const LIVE_SOURCES = {timer:"定时心跳", on_demand:"手动唤醒", assignment:"任务指派", automation:"自动规则"};
+const LIVE_STATUS = {running:"运行中", queued:"排队中", cancelling:"取消中"};
+function liveInfo(a){
+  const live = a && a.live;
+  return live && Array.isArray(live.runs) ? live : null;
+}
+function liveSource(run){
+  return LIVE_SOURCES[run && run.source] || (run && run.scope === "company" ? "后台唤醒" : "未标注来源");
+}
+function liveRunLabel(run){
+  if(!run) return "运行";
+  if(run.issue) return run.issue;
+  if(run.taskKey) return `${run.taskKey} · 未纳入当前任务窗口`;
+  if(run.unlisted) return "对话或较早任务";
+  return liveSource(run);
+}
+function liveRunState(run){
+  const status = (run && run.status) || "";
+  return LIVE_STATUS[status] || (RUN_STATUS[status]) || status || "状态未知";
+}
+function liveElapsedLabel(ms){
+  const seconds = Math.max(0, Math.floor(ms/1000));
+  if(seconds < 60) return `${seconds} 秒`;
+  if(seconds < 3600) return `${Math.floor(seconds/60)} 分钟`;
+  const hours = Math.floor(seconds/3600), minutes = Math.floor(seconds%3600/60);
+  return minutes ? `${hours} 小时 ${minutes} 分` : `${hours} 小时`;
+}
+function liveRunElapsed(run){
+  const started = Date.parse(run && run.startedAt);
+  const created = Date.parse(run && run.createdAt);
+  const start = Number.isFinite(started) ? started : created;
+  if(!Number.isFinite(start)) return "";
+  const prefix = (run.status === "queued") ? "已排队" : Number.isFinite(started) ? "已运行" : "已等待";
+  return `${prefix} ${liveElapsedLabel(Math.max(0, Date.now()-start))}`;
+}
+function liveRunOutputAge(run){
+  if(!run || run.status !== "running") return "";
+  const ts = Date.parse(run.lastOutputAt);
+  if(!Number.isFinite(ts)) return "";
+  const minutes = Math.max(0, Math.floor((Date.now()-ts)/60000));
+  return minutes < 1 ? "最近输出刚刚" : `最近输出 ${ageLabel(minutes)}`;
+}
+function liveRunLine(run){
+  return `${liveRunLabel(run)} · ${liveRunState(run)}${liveRunElapsed(run) ? " · " + liveRunElapsed(run) : ""}${liveRunOutputAge(run) ? " · " + liveRunOutputAge(run) : ""}`;
+}
+function liveHeadText(a){
+  const live = liveInfo(a);
+  if(!live) return a.running > 0 ? `${a.running} 个运行 / 排队` : "";
+  const parts = [];
+  if(live.taskRunning) parts.push(`${live.taskRunning} 个任务运行`);
+  if(live.backgroundRunning) parts.push(`${live.backgroundRunning} 个后台运行`);
+  const queued = (live.taskQueued || 0) + (live.backgroundQueued || 0);
+  if(queued) parts.push(`${queued} 个排队`);
+  return parts.join(" · ");
+}
+function liveTotalsText(d){
+  if(!d || !Number.isFinite(d.liveTaskRunning)) return d && d.liveRuns > 0 ? `${d.liveRuns} 个活跃运行` : "团队待命";
+  const parts = [];
+  if(d.liveTaskRunning) parts.push(`${d.liveTaskRunning} 个任务运行`);
+  if(Number.isFinite(d.liveBackgroundRunning) && d.liveBackgroundRunning) parts.push(`${d.liveBackgroundRunning} 个后台运行`);
+  if(Number.isFinite(d.liveQueued) && d.liveQueued) parts.push(`${d.liveQueued} 个排队`);
+  return parts.length ? parts.join(" · ") : "团队待命";
+}
+function liveStateClass(a){
+  const live = liveInfo(a);
+  if(!live) return a.running > 0 ? "running" : "";
+  if(live.taskRunning) return "running";
+  if(live.running) return "live";
+  if(live.queued) return "queued";
+  return "";
+}
+function liveRailTag(a){
+  const live = liveInfo(a);
+  if(!live) return a.running > 0 ? `<span class="tag run">${a.running} 活跃</span>` : "";
+  const queued = (live.taskQueued || 0) + (live.backgroundQueued || 0);
+  if(live.taskRunning){
+    const extra = `${live.backgroundRunning ? ` · ${live.backgroundRunning} 后台` : ""}${queued ? ` · ${queued} 排队` : ""}`;
+    return `<span class="tag run">${live.taskRunning} 任务运行${extra}</span>`;
+  }
+  if(live.backgroundRunning){
+    return `<span class="tag bg">${live.backgroundRunning} 后台运行${queued ? ` · ${queued} 排队` : ""}</span>`;
+  }
+  if(live.taskQueued) return `<span class="tag queue">${live.taskQueued} 任务排队</span>`;
+  if(live.backgroundQueued) return `<span class="tag queue">${live.backgroundQueued} 排队</span>`;
+  return "";
+}
+function liveRunTitle(a){
+  const live = liveInfo(a);
+  if(!live || !live.runs.length) return "";
+  return live.runs.map(liveRunLine).join("\n") + "\n任务时间线只绘制与任务关联的运行。";
+}
+
 /* ---------- 极简 Markdown ---------- */
 function mdInline(t){
   return t
@@ -1086,9 +1201,15 @@ async function refreshState(){
     $("#sync").textContent = `已同步 ${lastSync}`;
     const live = $("#live"), txt = $("#livetext");
     live.classList.remove("offline");
-    live.classList.toggle("idle", !d.liveRuns);
-    txt.textContent = d.liveRuns > 0 ? `${d.liveRuns} 个活跃运行` : "团队待命";
-    live.title = "运行中与排队中的任务数";
+    const liveTask = Number.isFinite(d.liveTaskRunning) ? d.liveTaskRunning : null;
+    const liveBg = Number.isFinite(d.liveBackgroundRunning) ? d.liveBackgroundRunning : null;
+    const liveQueued = Number.isFinite(d.liveQueued) ? d.liveQueued : 0;
+    txt.textContent = liveTotalsText(d);
+    live.classList.toggle("idle", !(d.liveRuns > 0));
+    live.classList.toggle("background", !!d.liveRuns && !liveTask && !!liveBg);
+    live.classList.toggle("queued", !!d.liveRuns && Number.isFinite(d.liveRunning) && !(d.liveRunning > 0));
+    live.title = liveTask == null ? "运行中与排队中的任务数"
+      : `任务运行 ${liveTask || 0} · 后台运行 ${liveBg || 0} · 排队 ${liveQueued}；后台运行含定时心跳、对话唤醒，不会显示在任务时间线。`;
     $("#agent-count").textContent = agents.length;
     $("#railfoot").textContent = agents.length ? `${agents.length} 个成员 · 当前团队` : "当前团队暂无成员";
     if(!agents.length){
@@ -1096,6 +1217,7 @@ async function refreshState(){
       renderEmptyTeam();
     } else if(!agents.some(a => a.id === selected)) selectAgent(agents[0].id);
     else { renderRail(); renderHead(); renderModel(); }
+    if(view === "tasks" && taskLayout === "trace" && tasksLoaded) renderTasks();
     updateBrand();
     if(view === "chat") renderChat();
   }catch(e){
@@ -1124,17 +1246,23 @@ function renderRail(){
     return;
   }
   const html = agents.map(a => {
-    const dot = a.running > 0 ? "running" : (freshError(a) ? "error" : "idle");
-    const tag = a.running > 0 ? `<span class="tag run">${a.running} 活跃</span>`
-              : freshError(a) ? '<span class="tag err">异常</span>' : "";
+    const live = liveInfo(a);
+    const dot = live
+      ? (live.taskRunning ? "running" : live.running ? "live" : live.queued ? "queued" : freshError(a) ? "error" : "idle")
+      : (a.running > 0 ? "running" : (freshError(a) ? "error" : "idle"));
+    const tag = liveRailTag(a) || (freshError(a) ? '<span class="tag err">异常</span>' : "");
     const task = a.current ? `${a.current.identifier} · ${a.current.title}` : "暂无在办任务";
     const role = ROLES[a.name]?.[0] || a.title || "成员";
-    const label = `${a.name} · ${role} · ${a.running > 0 ? `${a.running} 个运行或排队` : freshError(a) ? "最近运行异常" : "待命"}`;
-    return `<button type="button" class="agent ${a.id===selected?"sel":""}" data-id="${esc(a.id)}" aria-pressed="${a.id===selected}" aria-label="${esc(label)}" title="${esc(task)}">
+    const stateText = liveHeadText(a) || (freshError(a) ? "最近运行异常" : "待命");
+    const taskRunning = live ? !!live.taskRunning : a.running > 0;
+    const label = `${a.name} · ${role} · ${stateText}`;
+    const detail = liveRunTitle(a);
+    const hint = detail ? `${task}\n${detail}` : task;
+    return `<button type="button" class="agent ${a.id===selected?"sel":""}" data-id="${esc(a.id)}" aria-pressed="${a.id===selected}" aria-label="${esc(label)}" title="${esc(hint)}">
       ${avatar(a.name).replace("</div>", `<span class="ring ${dot}"></span></div>`)}
       <span class="body">
         <span class="row1"><span class="nm">${esc(a.name)}</span><span class="role">${esc(role)}</span></span>
-        <span class="row2"><span class="task ${a.running>0?"run":""}">${esc(task)}</span>${tag}</span>
+        <span class="row2"><span class="task ${taskRunning?"run":""}">${esc(task)}</span>${tag}</span>
       </span>
     </button>`;
   }).join("");
@@ -1155,12 +1283,13 @@ function renderHead(){
   const a = agents.find(x => x.id === selected);
   if(!a) return;
   $("#title").textContent = a.name;
-  const stateText = a.running > 0 ? `${a.running} 个运行` : freshError(a) ? "最近异常" : "待命";
+  const liveText = liveHeadText(a);
+  const stateText = liveText || (freshError(a) ? "最近异常" : "待命");
   $("#roommeta").textContent = `${ROLES[a.name]?.[0] || a.title || "团队成员"} · 名下 ${a.openCount || 0} 个未结任务 · ${stateText}`;
   const status = $("#roomstatus");
-  status.className = `room-status ${a.running > 0 ? "running" : freshError(a) ? "error" : ""}`;
-  status.textContent = a.running > 0 ? `${a.running} 个运行 / 排队` : freshError(a) ? "最近运行异常" : "待命中";
-  status.title = a.lastRunError ? `${a.lastRunError} · ${ageLabel(a.lastRunAgeMin)}` : "";
+  status.className = `room-status ${liveStateClass(a) || (freshError(a) ? "error" : "")}`;
+  status.textContent = liveText || (freshError(a) ? "最近运行异常" : "待命中");
+  status.title = liveRunTitle(a) || (a.lastRunError ? `${a.lastRunError} · ${ageLabel(a.lastRunAgeMin)}` : "");
   $("#roomhead .ava").outerHTML = avatar(a.name);
   const context = $("#taskcontext");
   context.hidden = !a.current;
@@ -1398,7 +1527,7 @@ function closePanel(restoreFocus = true){
   syncActiveMessage();
   updateTaskBadge();
   if(taskLayout === 'trace'){tasksSignature=null;renderTasks();}
-  const replacedTrigger=returnData.executionDetail ? Array.from($('#stream').querySelectorAll('[data-execution-detail]')).find(el=>el.dataset.executionDetail===returnData.executionDetail) : returnData.traceRun ? Array.from($('#tasklist').querySelectorAll('[data-trace-run]')).find(el=>el.dataset.traceRun===returnData.traceRun) : returnData.traceTask ? Array.from($('#tasklist').querySelectorAll('[data-trace-task]')).find(el=>el.dataset.traceTask===returnData.traceTask) : null;
+  const replacedTrigger=returnData.executionDetail ? Array.from($('#stream').querySelectorAll('[data-execution-detail]')).find(el=>el.dataset.executionDetail===returnData.executionDetail) : returnData.traceRun ? Array.from($('#tasklist').querySelectorAll('[data-trace-run]')).find(el=>el.dataset.traceRun===returnData.traceRun) : returnData.traceTask ? Array.from($('#tasklist').querySelectorAll('[data-trace-task]')).find(el=>el.dataset.traceTask===returnData.traceTask) : returnData.liveRun ? Array.from($('#tasklist').querySelectorAll('[data-live-run]')).find(el=>el.dataset.liveRun===returnData.liveRun) : null;
   if(restoreFocus) (detailReturnFocus?.isConnected ? detailReturnFocus : replacedTrigger || $("#paneltoggle")).focus({preventScroll:true});
   detailReturnFocus=null;
 }
@@ -1477,18 +1606,23 @@ function renderTasks(){
   if(taskLayout !== 'trace') return;
   const box = $("#tasklist");
   if(!tasksLoaded) return;
-  const signature = JSON.stringify([tasks, tasksMeta.note, tasksMeta.groups, taskLayout, traceZoom, traceSelected, traceRange, traceOffset, $("#tasks-search").value, $("#tasks-filter").value, Math.floor(Date.now()/(tasks.some(t=>t.runs.active) ? 1000 : 60000))]);
+  const agentLive = liveInfo(agents.find(a => a.id === selected));
+  const liveRuns = agentLive ? agentLive.runs : [];
+  const liveSignature = liveRuns.map(run => [run.id, run.status]);
+  const signature = JSON.stringify([tasks, tasksMeta.note, tasksMeta.groups, taskLayout, traceZoom, traceSelected, traceRange, traceOffset, $("#tasks-search").value, $("#tasks-filter").value, liveSignature, Math.floor(Date.now()/(tasks.some(t=>t.runs.active) ? 1000 : 60000))]);
   if(signature === tasksSignature) return;
   const pane = $("#taskspane"), scroll = pane.scrollTop;
   tasksSignature = signature;
   if(!tasks.length){
-    box.innerHTML = `<div class="empty"><div class="big">·</div><strong>当前查询范围暂无关联任务</strong><span>尚未查到该成员名下、参与讨论或执行过的任务。${esc(tasksMeta.note)}</span></div>`;
+    box.innerHTML = liveNoticeHTML(liveRuns, liveRuns.length ? "成员有进行中的运行 · 当前查询范围没有关联任务" : "")
+      + `<div class="empty"><div class="big">·</div><strong>当前查询范围暂无关联任务</strong><span>尚未查到该成员名下、参与讨论或执行过的任务。${esc(tasksMeta.note)}</span></div>`;
     pane.scrollTop = scroll;
     return;
   }
   const visible = filteredTasks();
   if(!visible.length){
-    box.innerHTML = '<div class="empty"><strong>没有匹配的任务</strong><span>试试其他关键词或状态。</span></div>';
+    box.innerHTML = liveNoticeHTML(liveRuns, liveRuns.length ? "成员有进行中的运行 · 当前筛选没有匹配任务" : "")
+      + '<div class="empty"><strong>没有匹配的任务</strong><span>试试其他关键词或状态。</span></div>';
     pane.scrollTop = scroll;
     return;
   }
@@ -1537,6 +1671,17 @@ function taskExecutionNote(task){
   const latest=attempts.slice().sort((a,b)=>(b.finishedAt || b.startedAt || b.createdAt || '').localeCompare(a.finishedAt || a.startedAt || a.createdAt || ''))[0];
   return `当前查询范围暂无 ${name} 的运行记录。${latest ? `最近运行记录：${latest.agentName || names[latest.agentId] || '未知成员'} · ${RUN_STATUS[latest.status] || latest.status || '状态未知'}。` : ''}`;
 }
+function liveNoticeHTML(runs, heading){
+  if(!runs || !runs.length) return "";
+  const title = heading || `进行中的运行 · 未出现在当前时间线（${runs.length}）`;
+  let html = `<div class="trace-live"><h4>${esc(title)}</h4>`;
+  for(const run of runs){
+    const elapsed = liveRunElapsed(run), outputAge = liveRunOutputAge(run);
+    html += `<div class="trace-live-row"><span class="live-dot ${esc(run.status || '')}" aria-hidden="true"></span><span class="trace-live-name">${esc(liveRunLabel(run))}</span><span class="trace-live-meta">${esc(liveRunState(run))}${elapsed ? ` · ${esc(elapsed)}` : ""}${outputAge ? ` · ${esc(outputAge)}` : ""}</span>${run.id ? `<button type="button" class="text-button" data-live-run="${esc(run.id)}" data-live-label="${esc(liveRunLabel(run))}">查看运行</button>` : ""}</div>`;
+  }
+  html += `<p class="trace-live-note">任务时间线只绘制与任务关联的运行；定时心跳、对话唤醒以及未纳入当前任务窗口的运行不会显示为任务条。</p></div>`;
+  return html;
+}
 function taskTraceHTML(items){
   const own = taskIntervals(items).filter(item=>item.run.agentId === selected);
   const windowSize = {'1h':3600000,'6h':21600000,'24h':86400000}[traceRange];
@@ -1545,8 +1690,13 @@ function taskTraceHTML(items){
   const windowStart = windowEnd - (windowSize || 0);
   const intervals = own.filter(r=>!windowSize || r.end>=windowStart && r.start<=windowEnd);
   const missing = items.filter(t=>!own.some(r=>r.task.id===t.id));
+  const agentLive = liveInfo(agents.find(a => a.id === selected));
+  // 只有真正画出时间条的运行才算"已出现在时间线"：排队/缺开始时间的是 0 宽时间点，肉眼看不到。
+  const drawnIds = new Set(intervals.filter(item=>item.measured).map(item=>item.run.id));
+  const unshownLive = agentLive ? agentLive.runs.filter(run=>!drawnIds.has(run.id)) : [];
   let html = `<div class="trace-tools"><span>${esc(names[selected] || '当前成员')} · 执行时间线</span><span class="grow"></span><select class="task-filter" data-trace-range aria-label="时间线范围">${[['1h','最近活动 1 小时'],['6h','最近活动 6 小时'],['24h','最近活动 24 小时'],['all','全部记录']].map(([value,label])=>`<option value="${value}" ${traceRange===value?'selected':''}>${label}</option>`).join('')}</select><button type="button" data-trace-window="previous" aria-label="前一个时间窗口" ${!windowSize?'disabled':''}>←</button><button type="button" data-trace-window="next" aria-label="后一个时间窗口" ${!windowSize || !traceOffset?'disabled':''}>→</button><button type="button" data-trace-zoom="out" aria-label="缩小时间线">−</button><span>${traceZoom}×</span><button type="button" data-trace-zoom="in" aria-label="放大时间线">＋</button><button type="button" data-trace-zoom="fit">适应</button></div>`;
   if(windowSize) html += `<div class="trace-window">${esc(traceTime(windowStart))} — ${esc(traceTime(windowEnd))} · ${intervals.length}/${own.length} 次运行${traceOffset ? '' : ' · 以最近运行定位'}</div>`;
+  if(unshownLive.length) html += liveNoticeHTML(unshownLive);
   if(missing.length){
     html+=`<div class="trace-unmeasured"><h4>关联任务 · 无可绘制的 ${esc(names[selected] || '当前成员')} 执行时间（${missing.length}）</h4>`;
     for(const task of missing) html+=`<button type="button" class="trace-unmeasured-task" data-trace-task="${esc(task.id)}" title="${esc(task.title)}"><span class="trace-unmeasured-info"><span class="trace-unmeasured-title"><strong>${esc(task.identifier || '任务')}</strong>${esc(task.title)}</span><span class="trace-unmeasured-note">${esc(taskExecutionNote(task))}</span></span>${statusChip(task.status,'任务：')}</button>`;
@@ -1626,6 +1776,11 @@ $('#tasklist').addEventListener('click', e=>{
   if(zoom){
     traceZoom = zoom.dataset.traceZoom==='fit' ? 1 : Math.max(1,Math.min(64,traceZoom*(zoom.dataset.traceZoom==='in' ? 2 : .5)));
     renderTasks();
+    return;
+  }
+  const liveButton = e.target.closest('[data-live-run]');
+  if(liveButton){
+    openLiveRun(liveButton.dataset.liveRun, liveButton.dataset.liveLabel || '后台运行', liveButton);
     return;
   }
   const target = e.target.closest('[data-trace-task]');
@@ -1920,10 +2075,13 @@ function renderDetail(){
     const signature=JSON.stringify([target,task,issueEvent,attempt,run,detailRunLoading.has(target.runId),detailRunErrors.get(target.runId),moreLoading.has(target.runId)]);
     if(signature===detailSignature) return;
     const key=JSON.stringify(target), same=$('#detailcontent').dataset.event===key, scroll=same ? $('#detailpane').scrollTop : 0;
-    let html=`<article class="comm-detail"><div class="output-label">${target.runId ? '运行与任务详情' : '任务详情'}</div><h3>${esc(task?.identifier || issueEvent?.issue || run?.issue || target.issue || '任务')} · ${esc(task?.title || issueEvent?.title || run?.issueTitle || '任务信息')}</h3>${statusChip(task?.status || issueEvent?.status,'任务：')}</article>`;
+    const headLabel=target.label ? target.label : (task?.identifier || issueEvent?.issue || run?.issue || target.issue || '任务');
+    const headTitle=target.label ? '运行过程' : (task?.title || issueEvent?.title || run?.issueTitle || '任务信息');
+    const headStatus=task?.status || issueEvent?.status;
+    let html=`<article class="comm-detail"><div class="output-label">${target.label ? '运行详情' : target.runId ? '运行与任务详情' : '任务详情'}</div><h3>${esc(headLabel)} · ${esc(headTitle)}</h3>${headStatus ? statusChip(headStatus,'任务：') : ''}</article>`;
     if(attempt) html+=`<div class="comm-detail"><strong>${esc(attempt.agentName || names[attempt.agentId] || '未知成员')} · ${esc(RUN_STATUS[attempt.status] || attempt.status)}</strong><div class="task-facts">开始：${esc(attempt.startedAt ? traceTime(Date.parse(attempt.startedAt)) : '尚未开始 / 未记录')}<br>结束：${esc(attempt.finishedAt ? traceTime(Date.parse(attempt.finishedAt)) : ['running','cancelling'].includes(attempt.status) ? '执行中' : '未记录')}<br>运行：${esc(attempt.id)}</div></div>`;
     html+=run ? executionBodyHTML(run) : target.runId ? `<div class="comm-detail task-note">${detailRunErrors.has(target.runId) ? `${esc(detailRunErrors.get(target.runId))}<button type="button" class="text-button" data-run-retry="${esc(target.runId)}">重试</button>` : '正在读取工具调用与助手消息…'}</div>` : `<div class="comm-detail task-note">${task ? esc(taskExecutionNote(task)) : '当前查询窗口暂无该成员的执行过程。'}</div>`;
-    html+=task ? taskDetailHTML(task) : '<div class="comm-detail task-note">该任务不在当前任务详情查询窗口内；这里只显示已获取的记录。</div>';
+    html+=task ? taskDetailHTML(task) : target.label ? '<div class="comm-detail task-note">该运行未出现在当前任务查询范围内，只展示运行过程。</div>' : '<div class="comm-detail task-note">该任务不在当前任务详情查询窗口内；这里只显示已获取的记录。</div>';
     $('#detailcontent').innerHTML=html;
     bindToolDetails($('#detailcontent'));
     $('#detailcontent').dataset.event=key;
@@ -1960,6 +2118,13 @@ function closeDetail(restoreFocus = true){
 function openTaskDetail(taskId,runId,issue,trigger){
   activeMessage=null;detailTarget={taskId,runId,issue};
   traceSelected={task:taskId,run:runId};detailSignature=null;
+  if(trigger) detailReturnFocus=trigger;
+  preserveStreamLayout(()=>openPanel());syncActiveMessage();
+  $('#detailpane').focus({preventScroll:true});
+}
+function openLiveRun(runId,label,trigger){
+  activeMessage=null;detailTarget={taskId:null,runId,issue:null,label:label || '后台运行'};
+  traceSelected=null;detailSignature=null;
   if(trigger) detailReturnFocus=trigger;
   preserveStreamLayout(()=>openPanel());syncActiveMessage();
   $('#detailpane').focus({preventScroll:true});

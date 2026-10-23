@@ -210,6 +210,36 @@ def fetch_comments(issue_id):
     return cached("c:" + issue_id, 20.0, _load)
 
 
+def live_run_view(run, issues_by_id):
+    """把一条 heartbeat run 压成 UI 能解释的状态。
+
+    `heartbeat-runs` 同时包含任务运行、隐藏的对话会话运行和定时心跳；
+    后两者没有当前任务窗口内的 issue，不能当成"有任务在执行"。
+    """
+    context = run.get("contextSnapshot")
+    context = context if isinstance(context, dict) else {}
+    issue_id = run.get("issueId") or context.get("issueId") or context.get("taskId")
+    issue = issues_by_id.get(issue_id) if issue_id else None
+    return {
+        "id": run.get("id"),
+        "status": run.get("status"),
+        "startedAt": run.get("startedAt"),
+        "createdAt": run.get("createdAt"),
+        # 最后一次输出时间：运行很久仍有输出，和完全没动静不是一回事
+        "lastOutputAt": run.get("lastOutputAt"),
+        "issueId": issue_id,
+        "issue": issue.get("identifier") if issue else None,
+        "issueTitle": issue.get("title") if issue else None,
+        # 任务不在当前100条窗口时仍保留唤醒时的编号，方便辨认是对话还是较早任务
+        "taskKey": context.get("taskKey"),
+        "linked": bool(issue),
+        # 有 issue 但不在当前任务窗口：通常是隐藏的对话会话或较早的任务
+        "unlisted": bool(issue_id and not issue),
+        "source": run.get("invocationSource"),
+        "scope": run.get("scopeKind"),
+    }
+
+
 def agent_snapshot(company=None):
     """左栏用：每个 agent 一行，带状态和当前任务。"""
     company = company or COMPANY
@@ -224,6 +254,8 @@ def agent_snapshot(company=None):
         if not aid:
             continue
         by_agent.setdefault(aid, []).append(it)
+    issues_by_id = {it.get("id"): it for it in issues
+                    if isinstance(it, dict) and it.get("id")}
 
     # 最近一次 run 的结局，用来标红/标绿
     last_run = {}
@@ -236,6 +268,8 @@ def agent_snapshot(company=None):
     live_by_agent = {}
     for r in live:
         live_by_agent.setdefault(r.get("agentId"), []).append(r)
+    live_views = {aid: [live_run_view(run, issues_by_id) for run in agent_runs]
+                  for aid, agent_runs in live_by_agent.items()}
 
     out = []
     for a in agents:
@@ -249,6 +283,14 @@ def agent_snapshot(company=None):
         open_ones.sort(key=lambda x: 0 if x.get("status") == "in_progress" else 1)
         current = open_ones[0] if open_ones else None
         running = live_by_agent.get(aid, [])
+        views = live_views.get(aid, [])
+        # 运行中的排前面；同类按开始时间倒序，最近的先看
+        views.sort(key=lambda r: r.get("startedAt") or r.get("createdAt") or "", reverse=True)
+        views.sort(key=lambda r: 0 if r.get("status") == "running" else 1)
+        live_running = [r for r in views if r.get("status") == "running"]
+        live_queued = [r for r in views if r.get("status") == "queued"]
+        task_views = [r for r in views if r.get("linked")]
+        background_views = [r for r in views if not r.get("linked")]
         lr = last_run.get(aid) or {}
         out.append({
             "id": aid,
@@ -256,6 +298,17 @@ def agent_snapshot(company=None):
             "title": a.get("title"),
             "status": a.get("status"),           # idle / running / error / paused
             "running": len(running),
+            "live": {
+                "running": len(live_running),
+                "queued": len(live_queued),
+                "task": len(task_views),
+                "background": len(background_views),
+                "taskRunning": sum(1 for r in task_views if r.get("status") == "running"),
+                "taskQueued": sum(1 for r in task_views if r.get("status") == "queued"),
+                "backgroundRunning": sum(1 for r in background_views if r.get("status") == "running"),
+                "backgroundQueued": sum(1 for r in background_views if r.get("status") == "queued"),
+                "runs": views,
+            },
             "model": (a.get("adapterConfig") or {}).get("model"),
             "lastRunStatus": lr.get("status"),
             "lastRunError": lr.get("error"),
@@ -272,16 +325,31 @@ def agent_snapshot(company=None):
                              if x.get("status") in OPEN_STATES),
         })
 
-    # 在跑的排前面；同组内按固定角色顺序，别让列表顺序随 API 返回乱跳
+    # 真正执行任务的排最前，其次后台运行，再其次排队；同组内按固定角色顺序
     role = {n: i for i, n in enumerate(
         ["PL", "Analyst", "Designer", "Architect", "Frontend", "Backend", "QA", "DevOps"])}
     out.sort(key=lambda x: (
-        0 if x["running"] > 0 else 1,
+        0 if x["live"]["taskRunning"] else
+        1 if x["live"]["backgroundRunning"] else
+        2 if x["live"]["queued"] else 3,
         role.get(x["name"], 99),
     ))
+    # 总数与列表里的行保持同一口径：页面顶栏说有几个，左栏就能数出几个
+    live_running_total = sum(item["live"]["running"] for item in out)
+    live_queued_total = sum(item["live"]["queued"] for item in out)
+    live_task_total = sum(item["live"]["task"] for item in out)
+    live_background_total = sum(item["live"]["background"] for item in out)
+    live_task_running = sum(item["live"]["taskRunning"] for item in out)
+    live_background_running = sum(item["live"]["backgroundRunning"] for item in out)
     return {
         "agents": out,
-        "liveRuns": len(live),
+        "liveRuns": live_running_total + live_queued_total,
+        "liveRunning": live_running_total,
+        "liveQueued": live_queued_total,
+        "liveTaskRuns": live_task_total,
+        "liveBackgroundRuns": live_background_total,
+        "liveTaskRunning": live_task_running,
+        "liveBackgroundRunning": live_background_running,
         "companyId": company,
         "serverTime": time.strftime("%H:%M:%S"),
     }

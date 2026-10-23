@@ -14,6 +14,7 @@ const assert = require('node:assert/strict');
     await page.route('**/api/run?**',route=>{
       const url=new URL(route.request().url()),id=url.searchParams.get('run');
       if(id==='b') return route.fulfill({json:{id:'b',agentId:'pl',status:'succeeded',state:'available',ts:'2026-10-22T08:02:00Z',entries:[{id:'old-reply',kind:'assistant',text:'历史运行的助手消息',ts:'2026-10-22T08:03:00Z'}]}});
+      if(id==='live-bg') return route.fulfill({json:{id:'live-bg',agentId:'pl',status:'running',state:'available',ts:new Date(Date.now()-5*60000).toISOString(),entries:[{id:'bg-entry',kind:'assistant',text:'后台运行过程',ts:new Date(Date.now()-4*60000).toISOString()}]}});
       if(id==='dense1' && ++denseAttempts>1) return route.fulfill({json:{id:'dense1',agentId:'pl',status:'succeeded',state:'available',ts:'2026-10-22T08:00:00Z',entries:[{id:'retry',kind:'assistant',text:'重试后恢复执行过程',ts:'2026-10-22T08:00:01Z'}]}});
       if(url.searchParams.has('before')) return route.fulfill({json:{state:'available',nextCursor:null,entries:[{id:'m-1',kind:'assistant',text:'更早的助手消息',ts:'2026-10-22T07:59:00Z'},{id:'m-20',kind:'assistant',text:'当前助手消息',ts:'2026-10-22T08:03:00Z'}]}});
       return route.fulfill({status:503,json:{error:'temporary'}});
@@ -177,6 +178,28 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('.trace-bar').count(),0);
     await page.locator('[data-trace-window="next"]').click();
     assert.equal(await page.locator('[data-trace-run="far"]').count(),1);
+    await page.setViewportSize({width:1440,height:900});
+    // Heartbeat/background runs must be named as such and explained in the task timeline.
+    await page.evaluate(()=>{
+      const agent=agents.find(a=>a.id==='pl');
+      agent.running=1;
+      agent.live={running:1,queued:0,task:0,background:1,taskRunning:0,taskQueued:0,backgroundRunning:1,backgroundQueued:0,runs:[{id:'live-bg',status:'running',startedAt:new Date(Date.now()-5*60000).toISOString(),createdAt:new Date(Date.now()-5*60000).toISOString(),issueId:null,issue:null,issueTitle:null,linked:false,unlisted:false,source:'timer',scope:'company'}]};
+      renderRail();renderHead();tasksSignature=null;renderTasks();
+    });
+    const plRow=page.locator('#agents .agent[data-id="pl"]');
+    assert.match(await plRow.innerText(),/1 后台运行/);
+    assert.doesNotMatch(await plRow.innerText(),/1 活跃/);
+    assert.equal(await page.locator('#roomstatus').innerText(),'1 个后台运行');
+    assert.equal(await page.evaluate(()=>liveTotalsText({liveTaskRunning:0,liveBackgroundRunning:2,liveQueued:0,liveRuns:2})),'2 个后台运行');
+    assert.equal(await page.evaluate(()=>liveTotalsText({liveTaskRunning:1,liveBackgroundRunning:1,liveQueued:1,liveRuns:3})),'1 个任务运行 · 1 个后台运行 · 1 个排队');
+    assert.equal(await page.evaluate(()=>liveTotalsText({liveRuns:2})),'2 个活跃运行');
+    assert.match(await page.locator('.trace-live').innerText(),/定时心跳/);
+    assert.match(await page.locator('.trace-live').innerText(),/未出现在当前时间线/);
+    await page.locator('[data-live-run="live-bg"]').click();
+    assert.match(await page.locator('#detailcontent').innerText(),/运行详情/);
+    assert.match(await page.locator('#detailcontent').innerText(),/未出现在当前任务查询范围/);
+    await page.getByText('后台运行过程',{exact:true}).waitFor();
+    await page.locator('#closepanel').click();
     // A member may have no current assignments/comments but still have historical executions.
     const historicalTask=await page.evaluate(()=>({...tasks[0],id:'reassigned',identifier:'HER-7',title:'已转派的任务',relation:'executed',status:'blocked',
       attempts:[{id:'analyst-run',agentId:'analyst',agentName:'Analyst',status:'failed',startedAt:'2026-10-20T08:00:00Z',finishedAt:'2026-10-20T08:05:00Z'}]}));
@@ -199,6 +222,16 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('[data-trace-run="analyst-run"]').count(),1);
     await page.evaluate(()=>{tasks=[];tasksMeta.note='非完整历史';renderTasks();});
     assert.match(await page.locator('#tasklist').innerText(),/当前查询范围暂无关联任务/);
+    await page.evaluate(()=>{
+      agents=[{id:'analyst',name:'Analyst',status:'running',running:1,openCount:0,current:null,
+        live:{running:1,queued:0,task:0,background:1,taskRunning:0,taskQueued:0,backgroundRunning:1,backgroundQueued:0,
+          runs:[{id:'live-bg',status:'running',startedAt:new Date(Date.now()-5*60000).toISOString(),createdAt:new Date(Date.now()-5*60000).toISOString(),issueId:null,issue:null,issueTitle:null,linked:false,unlisted:false,source:'timer',scope:'company'}]}}];
+      names.analyst='Analyst';tasksSignature=null;renderRail();renderHead();renderTasks();
+    });
+    assert.match(await page.locator('#agents .agent[data-id="analyst"]').innerText(),/1 后台运行/);
+    assert.equal(await page.locator('#roomstatus').innerText(),'1 个后台运行');
+    assert.match(await page.locator('#tasklist').innerText(),/成员有进行中的运行 · 当前查询范围没有关联任务/);
+    assert.match(await page.locator('#tasklist').innerText(),/任务时间线只绘制与任务关联的运行/);
     assert.deepEqual(errors,[]);
     console.log('PASS: task ownership vs member execution, unmeasured task details and member-scoped active filters; historical executed/reassigned task hydration and scoped empty state; collapsed execution rows; sidebar tools/replies, history/pagination/dedup, live updates and scroll/expansion retention; central views, details, filters and 4 viewports');
   }finally{await browser.close();}
