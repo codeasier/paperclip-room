@@ -462,7 +462,6 @@ for (const width of [1440, 1024, 390, 320]) {
   });
 }
 
-
 test('scroll-to-latest is a compact icon button when not stuck to bottom', async ({ page }) => {
   await page.setViewportSize({ width: 760, height: 640 });
   await page.route('**/api/**', async (route) => {
