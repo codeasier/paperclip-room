@@ -48,7 +48,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if url.path == "/api/teams":
                 return self._send(200, s.teams_payload())
-            if url.path not in ("/api/state", "/api/ops", "/api/tasks", "/api/chat", "/api/room", "/api/execution", "/api/run"):
+            if url.path not in ("/api/state", "/api/ops", "/api/tasks", "/api/chat", "/api/room", "/api/execution", "/api/run", "/api/member-config"):
                 return self._send(404, {"error": "not found"})
             company = self._company(query)
             if not company:
@@ -60,6 +60,14 @@ class Handler(BaseHTTPRequestHandler):
             aid = query.get("agent", [""])[0]
             if not re.fullmatch(r"[a-zA-Z0-9-]{1,80}", aid):
                 return self._send(400, {"error": "valid agent required"})
+            if url.path == "/api/member-config":
+                result = s.get_member_config(company, aid)
+                if result is None:
+                    return self._send(404, {"error": "agent not found for this team"})
+                if result.get("ok") is False:
+                    return self._send(result.get("httpStatus") or 502, {"error": result.get("error")})
+                public = {k: v for k, v in result.items() if not k.startswith("_")}
+                return self._send(200, public)
             if url.path == "/api/tasks":
                 result = s.cached(f"tasks:{company}:{aid}", 4, lambda: s.agent_tasks(aid, company))
             elif url.path == "/api/chat":
@@ -90,11 +98,20 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length)) if length else {}
             if not isinstance(body, dict):
                 raise ValueError("JSON object required")
-            if url.path not in ("/api/tasks", "/api/chat", "/api/send", "/api/model"):
+            if url.path not in ("/api/tasks", "/api/chat", "/api/send", "/api/model", "/api/member-config"):
                 return self._send(404, {"error": "not found"})
             company = self._company(parse_qs(url.query), body)
             if not company:
                 return self._send(404, {"error": "team not found"})
+            if url.path == "/api/member-config":
+                aid = body.get("agentId")
+                if not isinstance(aid, str) or not aid.strip():
+                    return self._send(400, {"ok": False, "error": "agentId required", "field": "agentId"})
+                fields = {k: v for k, v in body.items() if k not in ("agentId", "company")}
+                result = s.apply_member_patch(company, aid.strip(), fields)
+                status = 200 if result.get("ok") else (result.get("httpStatus") or 400)
+                public = {k: v for k, v in result.items() if k != "httpStatus"}
+                return self._send(status, public)
             aid = body.get("agentId")
             field = {"/api/tasks": "title", "/api/model": "model"}.get(url.path, "text")
             value = body.get(field)
@@ -109,7 +126,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 if not any(agent.get("id") == aid for agent in s.agents_for(company)):
                     return self._send(404, {"error": "agent not found for this team"})
-                result = s.set_model(aid, value.strip())
+                result = s.set_model(aid, value.strip(), company)
             return self._send(200, result)
         except (ValueError, TypeError):
             return self._send(400, {"error": "valid JSON object required"})
