@@ -174,39 +174,48 @@ export function MemberPropsDrawer({ company, agent, open, onClose }: Props) {
     setDiffOpen(true);
   };
 
+  const refreshAfterWrite = async () => {
+    await Promise.all([
+      client.invalidateQueries({ queryKey: ['/api/state', company] }),
+      client.invalidateQueries({ queryKey: ['/api/ops', company] }),
+      configQuery.refetch(),
+    ]);
+  };
+
   const confirmSave = async () => {
     if (!draft || !snapshot) return;
     const body = buildWriteBody(agent.id, draft, dirty);
     setSaving(true);
     try {
       const { status, body: result } = await saveMutation.mutateAsync(body);
+      const applied = result.applied ?? [];
+      const hasApplied = applied.length > 0;
+
+      if (result.ok) {
+        void message.success('已保存');
+        setDiffOpen(false);
+        await refreshAfterWrite();
+        return;
+      }
+
+      // 先看 applied：409 / field=instructions 也可能部分成功（顶层已写）
+      if (hasApplied) {
+        void message.warning(result.error ? `部分已保存（${result.error}）` : '部分已保存');
+        setDiffOpen(false);
+        await refreshAfterWrite();
+        return;
+      }
+
+      // 纯失败：无 applied（含 instructions 不可写 409）
       if (status === 409 || result.field === 'instructions') {
         void message.error(result.error || '当前 instructions 不可写');
         setDiffOpen(false);
         await configQuery.refetch();
         return;
       }
-      if (result.ok) {
-        void message.success('已保存');
-        setDiffOpen(false);
-        await Promise.all([
-          client.invalidateQueries({ queryKey: ['/api/state', company] }),
-          client.invalidateQueries({ queryKey: ['/api/ops', company] }),
-          configQuery.refetch(),
-        ]);
-        return;
-      }
-      if (result.applied && result.applied.length > 0) {
-        void message.warning(result.error || '部分已保存');
-        setDiffOpen(false);
-        await Promise.all([
-          client.invalidateQueries({ queryKey: ['/api/state', company] }),
-          client.invalidateQueries({ queryKey: ['/api/ops', company] }),
-          configQuery.refetch(),
-        ]);
-        return;
-      }
+
       void message.error(result.error || `保存失败（HTTP ${status}）`);
+      await configQuery.refetch();
     } catch (error) {
       void message.error(error instanceof Error ? error.message : '保存失败');
     } finally {

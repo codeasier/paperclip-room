@@ -18,6 +18,8 @@ type MemberFixtureOptions = {
   instructionsMode?: 'writable' | 'readonly' | 'unavailable';
   maxConcurrentRuns?: number;
   warning?: string | null;
+  /** Simulate 409 after top-level keys applied (instructions fails). */
+  partialFailInstructions?: boolean;
 };
 
 function memberConfig(options: MemberFixtureOptions = {}) {
@@ -71,6 +73,7 @@ function memberConfig(options: MemberFixtureOptions = {}) {
 
 async function fixture(page: Page, options: MemberFixtureOptions = {}) {
   const writes: { path: string; method: string; body: Record<string, unknown> }[] = [];
+  const reads: string[] = [];
   let config = memberConfig(options);
 
   await page.route('**/api/**', async (route: Route) => {
@@ -98,14 +101,18 @@ async function fixture(page: Page, options: MemberFixtureOptions = {}) {
         });
         return;
       }
-      if ('instructions' in body && config.identity.instructions.mode !== 'writable') {
+      if (
+        'instructions' in body &&
+        config.identity.instructions.mode !== 'writable' &&
+        !options.partialFailInstructions
+      ) {
         await route.fulfill({
           status: 409,
           json: { ok: false, error: '当前 instructions 不可写', field: 'instructions' },
         });
         return;
       }
-      const applied = Object.keys(body).filter((key) => key !== 'agentId');
+      // Apply top-level keys first (partial success may still leave instructions out).
       if (typeof body.model === 'string')
         config = { ...config, runtime: { ...config.runtime, model: body.model } };
       if (typeof body.timeoutSec === 'number')
@@ -119,6 +126,25 @@ async function fixture(page: Page, options: MemberFixtureOptions = {}) {
         config = { ...config, identity: { ...config.identity, name: body.name } };
       if (typeof body.title === 'string')
         config = { ...config, identity: { ...config.identity, title: body.title } };
+
+      if (options.partialFailInstructions && 'instructions' in body) {
+        const applied = Object.keys(body).filter(
+          (key) => key !== 'agentId' && key !== 'instructions',
+        ) as string[];
+        await route.fulfill({
+          status: 409,
+          json: {
+            ok: false,
+            error: '当前 instructions 不可写',
+            field: 'instructions',
+            applied,
+            runtime: config.runtime,
+            identity: { name: config.identity.name, title: config.identity.title },
+          },
+        });
+        return;
+      }
+
       if (typeof body.instructions === 'string')
         config = {
           ...config,
@@ -127,6 +153,7 @@ async function fixture(page: Page, options: MemberFixtureOptions = {}) {
             instructions: { ...config.identity.instructions, content: body.instructions },
           },
         };
+      const applied = Object.keys(body).filter((key) => key !== 'agentId');
       await route.fulfill({
         json: {
           ok: true,
@@ -149,6 +176,7 @@ async function fixture(page: Page, options: MemberFixtureOptions = {}) {
     }
 
     if (url.pathname === '/api/member-config') {
+      reads.push(url.pathname);
       await route.fulfill({ json: config });
       return;
     }
@@ -191,12 +219,13 @@ async function fixture(page: Page, options: MemberFixtureOptions = {}) {
       '/api/room': { events: [] },
       '/api/execution': { state: 'available', runs: [] },
     };
+    reads.push(url.pathname);
     await route.fulfill({ json: response[url.pathname] || {} });
   });
 
   await page.goto('/');
   await expect(page.getByText('你好，准备开始。')).toBeVisible();
-  return { writes, getConfig: () => config };
+  return { writes, reads, getConfig: () => config };
 }
 
 async function openProps(page: Page) {
@@ -340,4 +369,34 @@ test('无变更点保存 toast', async ({ page }) => {
   await page.getByLabel('最大并发').fill('3');
   await page.getByRole('button', { name: '放弃' }).click();
   await expect(page.getByRole('button', { name: '保存…' })).toHaveCount(0);
+});
+
+test('部分成功：409 + applied 提示部分已保存并刷新 state/ops', async ({ page }) => {
+  const { writes, reads, getConfig } = await fixture(page, {
+    instructionsMode: 'writable',
+    partialFailInstructions: true,
+  });
+  await openProps(page);
+  await page.getByRole('tab', { name: '身份' }).click();
+  await page.getByLabel('成员名称').fill('PL-Partial');
+  await page.getByLabel('成员 instructions').fill('Should fail after name applied.');
+  const stateBefore = reads.filter((path) => path === '/api/state').length;
+  const opsBefore = reads.filter((path) => path === '/api/ops').length;
+  await page.getByRole('button', { name: '保存…' }).click();
+  await expect(page.getByText('保存前确认')).toBeVisible();
+  await page.getByRole('button', { name: '确认修改 instructions' }).click();
+  await expect
+    .poll(() => writes.filter((item) => item.path === '/api/member-config').length)
+    .toBe(1);
+  await expect(page.getByText('部分已保存')).toBeVisible();
+  expect(getConfig().identity.name).toBe('PL-Partial');
+  await expect
+    .poll(() => reads.filter((path) => path === '/api/state').length)
+    .toBeGreaterThan(stateBefore);
+  await expect
+    .poll(() => reads.filter((path) => path === '/api/ops').length)
+    .toBeGreaterThan(opsBefore);
+  await expect
+    .poll(() => reads.filter((path) => path === '/api/member-config').length)
+    .toBeGreaterThan(1);
 });
