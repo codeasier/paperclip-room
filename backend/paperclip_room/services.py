@@ -9,6 +9,7 @@ import uuid
 from urllib.parse import quote
 from datetime import datetime, timezone
 from contextlib import closing
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 from .config import COMPANY, HERMES_DB
@@ -1002,16 +1003,562 @@ def send_chat(company, agent_id, text):
             "error": f"发送失败 HTTP {status}: {json.dumps(saved, ensure_ascii=False)[:180]}"}
 
 
-def set_model(agent_id, model):
-    st, data = call("GET", f"/api/agents/{agent_id}")
-    if st != 200:
-        return {"ok": False, "error": f"读 agent 失败 HTTP {st}"}
-    cfg = dict((data or {}).get("adapterConfig") or {})
-    cfg["model"] = model
-    st2, d2 = call("PATCH", f"/api/agents/{agent_id}", {"adapterConfig": cfg})
-    if st2 in (200, 201):
+# ---------------------------------------------------------------- 成员属性（member-config）
+
+MEMBER_CONFIG_KEYS = ("model", "timeoutSec", "maxConcurrentRuns", "name", "title", "instructions")
+MEMBER_TIMEOUT_MIN = 1200
+MEMBER_CONCURRENT_MAX = 8
+MEMBER_CONCURRENT_PLATFORM_DEFAULT = 20
+MEMBER_INSTRUCTIONS_MAX_BYTES = 256 * 1024
+MEMBER_CONCURRENT_WARNING = "超出控制台建议上限，保存前请调到 ≤8"
+MEMBER_WORKDIR_KEYS = ("cwd", "workingDirectory", "workDir", "workspacePath", "workspace")
+INSTRUCTIONS_ENTRY_DEFAULT = "AGENTS.md"
+
+
+def invalidate_member_caches(company):
+    """写成功后失效 agents / ops 相关缓存，保证一轮询内可见。"""
+    for key in list(_CACHE):
+        if key == "agents:" + company or key.startswith("agents:" + company + ":"):
+            _CACHE.pop(key, None)
+        elif key.startswith("ops:") and (key.endswith(":" + company) or (":" + company + ":") in key or key == "ops:" + company):
+            _CACHE.pop(key, None)
+
+
+def _shanghai_now_iso():
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Shanghai")).isoformat()
+    except Exception:
+        return datetime.now(timezone.utc).isoformat()
+
+
+def _runtime_from_agent(agent):
+    """归一 runtime 展示：timeout 缺省 null；并发缺键展示平台默认 20；>8 带回真实值+warning。"""
+    cfg = agent.get("adapterConfig") or {}
+    rc = agent.get("runtimeConfig") or {}
+    heartbeat = rc.get("heartbeat") if isinstance(rc.get("heartbeat"), dict) else {}
+    timeout = cfg.get("timeoutSec")
+    if timeout is not None:
+        try:
+            timeout = int(timeout)
+        except (TypeError, ValueError):
+            timeout = None
+    raw_concurrent = heartbeat.get("maxConcurrentRuns") if isinstance(heartbeat, dict) else None
+    capped = False
+    warning = None
+    if raw_concurrent is None:
+        concurrent = MEMBER_CONCURRENT_PLATFORM_DEFAULT
+    else:
+        try:
+            concurrent = int(raw_concurrent)
+        except (TypeError, ValueError):
+            concurrent = MEMBER_CONCURRENT_PLATFORM_DEFAULT
+            raw_concurrent = None
+        else:
+            if concurrent > MEMBER_CONCURRENT_MAX:
+                warning = MEMBER_CONCURRENT_WARNING
+                capped = False
+    return {
+        "model": cfg.get("model"),
+        "timeoutSec": timeout,
+        "maxConcurrentRuns": concurrent,
+        "maxConcurrentRunsPlatformDefault": MEMBER_CONCURRENT_PLATFORM_DEFAULT,
+        "maxConcurrentRunsCapped": capped,
+        "warning": warning,
+        "_rawMaxConcurrentRuns": raw_concurrent,
+    }
+
+
+def probe_instructions(agent_id, agent=None):
+    """探测 instructions：bundle 入口 → promptTemplate → unavailable。
+
+    返回 identity.instructions 形状；写前可再次调用。mode∈writable|readonly|unavailable。
+    """
+    agent = agent or {}
+    bundle_st, bundle = call("GET", f"/api/agents/{agent_id}/instructions-bundle")
+    entry = INSTRUCTIONS_ENTRY_DEFAULT
+    if bundle_st == 200 and isinstance(bundle, dict):
+        entry = bundle.get("entryFile") or bundle.get("entry") or entry
+        file_st, file_data = call(
+            "GET", f"/api/agents/{agent_id}/instructions-bundle/file?path={quote(entry, safe='/')}"
+        )
+        if file_st == 200 and isinstance(file_data, dict):
+            content = file_data.get("content")
+            if content is None:
+                content = ""
+            # board token 默认可写；403/策略位 → readonly
+            mode = "writable"
+            if file_data.get("writable") is False or bundle.get("writable") is False:
+                mode = "readonly"
+            if bundle.get("mode") == "readonly" or file_data.get("mode") == "readonly":
+                mode = "readonly"
+            return {
+                "mode": mode,
+                "source": "bundle",
+                "path": entry,
+                "content": content if isinstance(content, str) else str(content),
+                "contentHash": file_data.get("contentHash") or file_data.get("baseHash"),
+                "probeNote": None,
+            }
+        if file_st in (401, 403):
+            return {
+                "mode": "readonly",
+                "source": "bundle",
+                "path": entry,
+                "content": "",
+                "contentHash": None,
+                "probeNote": f"instructions-bundle 不可写（HTTP {file_st}）",
+            }
+        if file_st == 404 and bundle_st == 200:
+            # bundle 存在但入口空：仍可按可写空文件处理
+            return {
+                "mode": "writable",
+                "source": "bundle",
+                "path": entry,
+                "content": "",
+                "contentHash": None,
+                "probeNote": "入口文件尚不存在，保存时将创建",
+            }
+    cfg = (agent.get("adapterConfig") if agent else None) or {}
+    if not cfg and agent_id:
+        st, data = call("GET", f"/api/agents/{agent_id}")
+        if st == 200 and isinstance(data, dict):
+            cfg = data.get("adapterConfig") or {}
+            agent = data
+    prompt = cfg.get("promptTemplate")
+    if isinstance(prompt, str):
+        return {
+            "mode": "writable",
+            "source": "promptTemplate",
+            "path": None,
+            "content": prompt,
+            "contentHash": None,
+            "probeNote": None,
+        }
+    note = "无 instructions-bundle，也无 adapterConfig.promptTemplate"
+    if bundle_st not in (200, 404):
+        note = f"instructions-bundle 探测失败 HTTP {bundle_st}"
+    return {
+        "mode": "unavailable",
+        "source": None,
+        "path": None,
+        "content": "",
+        "contentHash": None,
+        "probeNote": note,
+    }
+
+
+def _agent_workdir(agent):
+    """仅当配置里已有本机可读工作目录类字段时返回 Path；禁止猜路径。"""
+    cfg = agent.get("adapterConfig") or {}
+    for key in MEMBER_WORKDIR_KEYS:
+        value = cfg.get(key)
+        if isinstance(value, str) and value.strip():
+            path = Path(value).expanduser()
+            try:
+                if path.is_dir():
+                    return path
+            except OSError:
+                continue
+    return None
+
+
+def _memory_session_reuse(company, agent_id, agent):
+    as_of = _shanghai_now_iso()
+    cfg = agent.get("adapterConfig") or {}
+    persist = cfg.get("persistSession")
+    window = fetch_agent_runs(agent_id, company)
+    runs = window.get("runs") or [] if isinstance(window, dict) else []
+    sessions = []
+    latest_ts = None
+    for run in runs:
+        sid = run.get("sessionIdAfter")
+        if sid:
+            sessions.append(sid)
+        ts = run.get("finishedAt") or run.get("startedAt") or run.get("createdAt")
+        if ts and (latest_ts is None or _ts(ts) > _ts(latest_ts)):
+            latest_ts = ts
+    detail_bits = []
+    if persist is True:
+        detail_bits.append("配置意图 persistSession=true")
+    elif persist is False:
+        detail_bits.append("配置意图 persistSession=false")
+    if not sessions:
+        return {
+            "state": "unknown",
+            "detail": "；".join(detail_bits + ["近期运行无 sessionIdAfter"]) or "近期运行无 sessionIdAfter",
+            "source": "heartbeat-runs.sessionIdAfter",
+            "asOf": latest_ts or as_of,
+        }
+    unique = list(dict.fromkeys(sessions))
+    if len(sessions) >= 2 and sessions[0] == sessions[1]:
+        state = "reused"
+        detail_bits.append(f"最近两次运行共用 session {sessions[0][:12]}…")
+    elif len(unique) == 1 and len(sessions) >= 2:
+        state = "reused"
+        detail_bits.append(f"窗口内复用同一 session {unique[0][:12]}…")
+    elif len(unique) == len(sessions) and len(sessions) >= 2:
+        state = "fresh"
+        detail_bits.append("窗口内各次运行 session 均不同")
+    else:
+        state = "unknown"
+        detail_bits.append(f"可见 {len(sessions)} 条 session 线索")
+    return {
+        "state": state,
+        "detail": "；".join(detail_bits),
+        "source": "heartbeat-runs.sessionIdAfter",
+        "asOf": latest_ts or as_of,
+    }
+
+
+def _memory_handoff(agent):
+    as_of = _shanghai_now_iso()
+    root = _agent_workdir(agent)
+    if root is None:
+        return {
+            "state": "unavailable",
+            "files": [],
+            "source": "adapterConfig.workdir",
+            "asOf": as_of,
+            "detail": "成员配置无可读工作目录，未扫描磁盘",
+        }
+    handoff = root / ".handoff"
+    try:
+        if not handoff.is_dir():
+            return {
+                "state": "empty",
+                "files": [],
+                "source": str(handoff),
+                "asOf": as_of,
+            }
+        files = []
+        for item in sorted(handoff.iterdir(), key=lambda p: p.name):
+            if not item.is_file():
+                continue
+            try:
+                mtime = datetime.fromtimestamp(item.stat().st_mtime, timezone.utc).isoformat()
+            except OSError:
+                mtime = None
+            files.append({"path": f".handoff/{item.name}", "mtime": mtime})
+        return {
+            "state": "available" if files else "empty",
+            "files": files[:50],
+            "source": str(handoff),
+            "asOf": as_of,
+        }
+    except OSError:
+        return {
+            "state": "unavailable",
+            "files": [],
+            "source": str(handoff),
+            "asOf": as_of,
+            "detail": "无法读取 .handoff 目录",
+        }
+
+
+def _memory_context_size(company, agent_id):
+    as_of = _shanghai_now_iso()
+    empty = {
+        "state": "unavailable",
+        "approxChars": None,
+        "unit": "chars",
+        "source": "HERMES_DB",
+        "asOf": as_of,
+    }
+    if not HERMES_DB.is_file():
+        return {**empty, "detail": "Hermes 会话库不可用"}
+    window = fetch_agent_runs(agent_id, company)
+    runs = window.get("runs") or [] if isinstance(window, dict) else []
+    sid = None
+    for run in runs:
+        if run.get("sessionIdAfter"):
+            sid = run["sessionIdAfter"]
+            break
+    if not sid:
+        return {**empty, "state": "empty", "detail": "近期运行无关联 session"}
+    try:
+        with closing(sqlite3.connect(HERMES_DB.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)) as db:
+            row = db.execute(
+                "SELECT COALESCE(SUM(LENGTH(COALESCE(content,''))),0) FROM messages WHERE session_id=?",
+                (sid,),
+            ).fetchone()
+            total = int(row[0]) if row else 0
+        return {
+            "state": "available" if total else "empty",
+            "approxChars": total,
+            "unit": "chars",
+            "source": "HERMES_DB",
+            "asOf": as_of,
+        }
+    except (sqlite3.Error, TypeError, ValueError, OSError):
+        return {**empty, "detail": "会话库暂不可读"}
+
+
+def member_memory(company, agent_id, agent):
+    """P2 记忆只读三块；任一块失败局部 unavailable，不拖垮整页。"""
+    try:
+        session_reuse = _memory_session_reuse(company, agent_id, agent)
+    except Exception:
+        session_reuse = {
+            "state": "unavailable", "detail": "会话复用探测失败",
+            "source": "heartbeat-runs", "asOf": _shanghai_now_iso(),
+        }
+    try:
+        handoff = _memory_handoff(agent)
+    except Exception:
+        handoff = {
+            "state": "unavailable", "files": [], "source": "adapterConfig.workdir",
+            "asOf": _shanghai_now_iso(),
+        }
+    try:
+        context_size = _memory_context_size(company, agent_id)
+    except Exception:
+        context_size = {
+            "state": "unavailable", "approxChars": None, "unit": "chars",
+            "source": "HERMES_DB", "asOf": _shanghai_now_iso(),
+        }
+    return {
+        "sessionReuse": session_reuse,
+        "handoff": handoff,
+        "contextSize": context_size,
+    }
+
+
+def get_member_config(company, agent_id):
+    """GET /api/member-config 聚合：runtime + identity + memory。"""
+    if not any(a.get("id") == agent_id for a in agents_for(company)):
+        return None
+    st, agent = call("GET", f"/api/agents/{agent_id}")
+    if st != 200 or not isinstance(agent, dict):
+        return {"ok": False, "error": f"读 agent 失败 HTTP {st}", "httpStatus": 502 if st >= 500 or st == 599 else 404}
+    runtime = _runtime_from_agent(agent)
+    runtime.pop("_rawMaxConcurrentRuns", None)
+    instructions = probe_instructions(agent_id, agent)
+    # 对外不暴露 contentHash（内部写用）；GET 形状按契约
+    public_instructions = {
+        "mode": instructions["mode"],
+        "source": instructions.get("source"),
+        "path": instructions.get("path"),
+        "content": instructions.get("content") or "",
+        "probeNote": instructions.get("probeNote"),
+    }
+    return {
+        "agentId": agent_id,
+        "companyId": company,
+        "fetchedAt": _shanghai_now_iso(),
+        "runtime": runtime,
+        "identity": {
+            "name": agent.get("name"),
+            "title": agent.get("title") if agent.get("title") is not None else "",
+            "instructions": public_instructions,
+        },
+        "memory": member_memory(company, agent_id, agent),
+        "_instructionsMeta": instructions,
+    }
+
+
+def validate_member_fields(fields):
+    """白名单值域校验。成功返回 (cleaned, None)；失败返回 (None, {ok,error,field})。"""
+    if not isinstance(fields, dict):
+        return None, {"ok": False, "error": "请求体须为对象", "field": None}
+    unknown = [k for k in fields if k not in MEMBER_CONFIG_KEYS]
+    if unknown:
+        return None, {"ok": False, "error": f"未知字段：{', '.join(unknown)}", "field": unknown[0]}
+    if not fields:
+        return None, {"ok": False, "error": "没有需要保存的更改", "field": None}
+    cleaned = {}
+    if "model" in fields:
+        model = fields["model"]
+        if not isinstance(model, str) or not model.strip() or len(model.strip()) > 128:
+            return None, {"ok": False, "error": "请选择或填写模型", "field": "model"}
+        cleaned["model"] = model.strip()
+    if "timeoutSec" in fields:
+        try:
+            if isinstance(fields["timeoutSec"], bool):
+                raise TypeError
+            timeout = int(fields["timeoutSec"])
+        except (TypeError, ValueError):
+            return None, {"ok": False, "error": "超时须 ≥ 1200 秒（与巡检一致）", "field": "timeoutSec"}
+        if timeout < MEMBER_TIMEOUT_MIN:
+            return None, {"ok": False, "error": "超时须 ≥ 1200 秒（与巡检一致）", "field": "timeoutSec"}
+        cleaned["timeoutSec"] = timeout
+    if "maxConcurrentRuns" in fields:
+        try:
+            if isinstance(fields["maxConcurrentRuns"], bool):
+                raise TypeError
+            concurrent = int(fields["maxConcurrentRuns"])
+        except (TypeError, ValueError):
+            return None, {"ok": False, "error": "并发须为 0–8 的整数", "field": "maxConcurrentRuns"}
+        if concurrent < 0 or concurrent > MEMBER_CONCURRENT_MAX:
+            return None, {"ok": False, "error": "并发须为 0–8 的整数", "field": "maxConcurrentRuns"}
+        cleaned["maxConcurrentRuns"] = concurrent
+    if "name" in fields:
+        name = fields["name"]
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 64:
+            return None, {"ok": False, "error": "名称不能为空", "field": "name"}
+        cleaned["name"] = name.strip()
+    if "title" in fields:
+        title = fields["title"]
+        if not isinstance(title, str) or len(title) > 128:
+            return None, {"ok": False, "error": "title 过长", "field": "title"}
+        cleaned["title"] = title
+    if "instructions" in fields:
+        instructions = fields["instructions"]
+        if not isinstance(instructions, str):
+            return None, {"ok": False, "error": "instructions 须为字符串", "field": "instructions"}
+        if len(instructions.encode("utf-8")) > MEMBER_INSTRUCTIONS_MAX_BYTES:
+            return None, {"ok": False, "error": "instructions 过长（上限 256KiB）", "field": "instructions"}
+        cleaned["instructions"] = instructions
+    return cleaned, None
+
+
+def _write_instructions(agent_id, content, probe):
+    """按探测来源写入；不可写由调用方先拦。"""
+    if probe.get("source") == "bundle":
+        path = probe.get("path") or INSTRUCTIONS_ENTRY_DEFAULT
+        body = {"path": path, "content": content, "baseHash": probe.get("contentHash")}
+        st, data = call("PUT", f"/api/agents/{agent_id}/instructions-bundle/file", body)
+        if st in (200, 201):
+            return True, None
+        return False, f"写 instructions-bundle 失败 HTTP {st}: {json.dumps(data, ensure_ascii=False)[:180]}"
+    if probe.get("source") == "promptTemplate":
+        st, agent = call("GET", f"/api/agents/{agent_id}")
+        if st != 200 or not isinstance(agent, dict):
+            return False, f"读 agent 失败 HTTP {st}"
+        cfg = dict(agent.get("adapterConfig") or {})
+        cfg["promptTemplate"] = content
+        st2, d2 = call("PATCH", f"/api/agents/{agent_id}", {"adapterConfig": cfg})
+        if st2 in (200, 201):
+            return True, None
+        return False, f"写 promptTemplate 失败 HTTP {st2}: {json.dumps(d2, ensure_ascii=False)[:180]}"
+    return False, "当前 instructions 不可写"
+
+
+def apply_member_patch(company, agent_id, fields):
+    """共享写内核：白名单 merge，禁 replaceAdapterConfig；跨团队由调用方或此处 404。
+
+    fields 已通过 validate_member_fields 的 cleaned 字典，或不含非法键。
+    返回 dict，含 ok / applied / error / field / httpStatus。
+    """
+    company = company or COMPANY
+    if not any(a.get("id") == agent_id for a in agents_for(company)):
+        return {"ok": False, "error": "agent not found for this team", "httpStatus": 404}
+
+    cleaned, err = validate_member_fields(fields)
+    if err:
+        err["httpStatus"] = 400
+        return err
+
+    want_instructions = "instructions" in cleaned
+    patch_fields = {k: v for k, v in cleaned.items() if k != "instructions"}
+
+    st, agent = call("GET", f"/api/agents/{agent_id}")
+    if st != 200 or not isinstance(agent, dict):
+        return {"ok": False, "error": f"读 agent 失败 HTTP {st}",
+                "httpStatus": 502 if st >= 500 or st == 599 else st}
+
+    applied = []
+    patch_body = {}
+
+    if "name" in patch_fields:
+        patch_body["name"] = patch_fields["name"]
+    if "title" in patch_fields:
+        patch_body["title"] = patch_fields["title"]
+
+    need_adapter = any(k in patch_fields for k in ("model", "timeoutSec"))
+    if need_adapter:
+        cfg = dict(agent.get("adapterConfig") or {})
+        if "model" in patch_fields:
+            cfg["model"] = patch_fields["model"]
+        if "timeoutSec" in patch_fields:
+            cfg["timeoutSec"] = patch_fields["timeoutSec"]
+        patch_body["adapterConfig"] = cfg
+
+    if "maxConcurrentRuns" in patch_fields:
+        rc = dict(agent.get("runtimeConfig") or {})
+        heartbeat = dict(rc.get("heartbeat") or {})
+        heartbeat["maxConcurrentRuns"] = patch_fields["maxConcurrentRuns"]
+        rc["heartbeat"] = heartbeat
+        patch_body["runtimeConfig"] = rc
+
+    if patch_body:
+        st2, d2 = call("PATCH", f"/api/agents/{agent_id}", patch_body)
+        if st2 not in (200, 201):
+            return {
+                "ok": False,
+                "error": f"HTTP {st2}: {json.dumps(d2, ensure_ascii=False)[:200]}",
+                "httpStatus": 502 if st2 >= 500 or st2 == 599 else st2,
+                "applied": [],
+            }
+        for key in ("name", "title", "model", "timeoutSec", "maxConcurrentRuns"):
+            if key in patch_fields:
+                applied.append(key)
+        # 刷新本地 agent 视图（后续 runtime/identity）
+        if isinstance(d2, dict):
+            agent = d2
+
+    instructions_error = None
+    if want_instructions:
+        probe = probe_instructions(agent_id, agent)
+        if probe.get("mode") != "writable":
+            instructions_error = {
+                "ok": False,
+                "error": "当前 instructions 不可写",
+                "field": "instructions",
+                "httpStatus": 409,
+                "applied": list(applied),
+            }
+        else:
+            ok_write, write_err = _write_instructions(agent_id, cleaned["instructions"], probe)
+            if ok_write:
+                applied.append("instructions")
+            else:
+                instructions_error = {
+                    "ok": False,
+                    "error": write_err or "写 instructions 失败",
+                    "field": "instructions",
+                    "httpStatus": 502,
+                    "applied": list(applied),
+                }
+
+    if applied:
+        invalidate_member_caches(company)
+
+    runtime = _runtime_from_agent(agent)
+    runtime.pop("_rawMaxConcurrentRuns", None)
+    # 若刚写入但响应未带回新值，用 cleaned 覆盖展示
+    if "model" in cleaned:
+        runtime["model"] = cleaned["model"]
+    if "timeoutSec" in cleaned:
+        runtime["timeoutSec"] = cleaned["timeoutSec"]
+    if "maxConcurrentRuns" in cleaned:
+        runtime["maxConcurrentRuns"] = cleaned["maxConcurrentRuns"]
+        runtime["warning"] = None
+
+    identity = {
+        "name": cleaned.get("name", agent.get("name")),
+        "title": cleaned["title"] if "title" in cleaned else (agent.get("title") if agent.get("title") is not None else ""),
+    }
+
+    if instructions_error:
+        instructions_error["runtime"] = runtime
+        instructions_error["identity"] = identity
+        return instructions_error
+
+    result = {"ok": True, "applied": applied, "runtime": runtime, "identity": identity}
+    if "model" in cleaned and len(cleaned) == 1:
+        # 兼容旧 /api/model 调用方：额外带 model 字段
+        result["model"] = cleaned["model"]
+    return result
+
+
+def set_model(agent_id, model, company=None):
+    """保留 Composer 快捷改模型；内部走共享 apply_member_patch。"""
+    company = company or COMPANY
+    result = apply_member_patch(company, agent_id, {"model": model})
+    if result.get("ok"):
         return {"ok": True, "model": model}
-    return {"ok": False, "error": f"HTTP {st2}: {json.dumps(d2, ensure_ascii=False)[:200]}"}
+    return {"ok": False, "error": result.get("error") or "改模型失败"}
 
 
 # ---------------------------------------------------------------- 巡检

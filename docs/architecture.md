@@ -47,13 +47,15 @@ Python ThreadingHTTPServer (backend/paperclip_room/http.py)
 | GET | `/api/execution?company=<id>&agent=<id>` | 当前成员最近4次运行及最新过程页 |
 | GET | `/api/run?company=<id>&agent=<id>&run=<uuid>&before=<cursor>` | 指定运行的更早过程页；校验团队与成员归属 |
 | POST | `/api/send?company=<id>` | 旧版任务评论入口，保留兼容；当前界面不再使用 |
-| POST | `/api/model` | JSON `{ "agentId": "…", "model": "…" }`；修改 adapterConfig.model |
+| GET | `/api/member-config?company=<id>&agent=<id>` | 成员属性聚合：runtime（model/timeoutSec/maxConcurrentRuns）+ identity（name/title/instructions 探测）+ memory（只读 sessionReuse/handoff/contextSize）；跨团队 404 |
+| POST | `/api/member-config?company=<id>` | JSON 白名单 `{ agentId, model?, timeoutSec?, maxConcurrentRuns?, name?, title?, instructions? }`；共享 `apply_member_patch` 内核；非法 400、instructions 不可写 409、跨团队 404；成功返回 applied + runtime/identity |
+| POST | `/api/model` | JSON `{ "agentId": "…", "model": "…" }`；Composer 快捷改模型；内部调用同一 `apply_member_patch`（只改 model，merge 不丢 hermesCommand/env） |
 
 除 `/api/teams` 外，所有团队相关接口都接受 `company` 参数；省略时回落到 `PAPERCLIP_COMPANY`。服务端只接受当前 token 可见且 active 的公司 ID，缓存按公司隔离。响应使用 JSON 和 `Cache-Control: no-store`。没有 SSE/WebSocket；状态5秒轮询，对话消息4秒轮询，任务进展、任务评论和过程8秒轮询，标签页进入后台时暂停。环境配置在进程启动时读取。
 
 ## Paperclip 接口依赖
 
-后端使用公司的 agents、issues、heartbeat-runs 列表、任务 comments、Agent Chat chats 接口、单个 heartbeat run，以及成员模型 PATCH 等接口。API 根路径由 `PAPERCLIP_BASE` 追加 `/api/...` 形成。不同 Paperclip 版本或 token 权限可能影响字段和可用性，应以所部署版本为准。
+后端使用公司的 agents、issues、heartbeat-runs 列表、任务 comments、Agent Chat chats 接口、单个 heartbeat run、成员 PATCH（adapterConfig/runtimeConfig/name/title），以及 instructions-bundle 读写等接口。API 根路径由 `PAPERCLIP_BASE` 追加 `/api/...` 形成。不同 Paperclip 版本或 token 权限可能影响字段和可用性，应以所部署版本为准。
 
 本项目主要为 Hermes 本地适配器运行的团队设计。页面读取已有运行、评论和配置，不承担 Paperclip 调度器或 Agent runner 的职责。
 
