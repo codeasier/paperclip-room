@@ -748,11 +748,24 @@ a:focus-visible {
   align-items: center;
   gap: 8px;
   padding: 6px 8px 8px 10px;
+  flex-wrap: wrap;
+}
+.composer-tools {
+  flex: none;
+  min-width: 0;
+  min-height: 0;
+}
+.composer-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  min-width: 0;
 }
 .model-select {
   min-width: 0;
   width: 193px;
-  max-width: calc(100% - 105px);
+  max-width: min(193px, calc(100vw - 160px));
 }
 .model-select .ant-select-content,
 .model-select .ant-select-selector {
