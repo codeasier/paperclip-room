@@ -495,6 +495,151 @@ a:focus-visible {
   padding: 16px 20px;
   overflow-x: hidden;
 }
+
+.member-props-drawer .ant-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 8px;
+}
+.member-props-title:focus {
+  outline: none;
+}
+.member-props-hero {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.member-props-hero-copy {
+  flex: 1;
+  min-width: 0;
+}
+.member-props-hero-copy strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 650;
+}
+.member-props-hero-copy > span {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.member-props-loading {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+}
+.member-props-tabs .ant-tabs-nav {
+  margin-bottom: 12px;
+}
+.member-props-form .ant-form-item {
+  margin-bottom: 14px;
+}
+.member-props-form .ant-form-item-explain,
+.member-props-help {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.member-props-number {
+  width: 100%;
+}
+.member-props-alert {
+  margin-bottom: 12px;
+}
+.member-props-section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+  margin-bottom: 6px;
+}
+.member-props-preview {
+  margin-bottom: 14px;
+}
+.member-props-readonly-tag.ant-tag {
+  margin: 0;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 6px;
+  border: 0;
+  background: #f0f2f5;
+  color: var(--ink-2);
+}
+.member-props-readonly-block {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--rail);
+  border: 1px solid var(--line);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  max-height: 280px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+}
+.member-props-instructions-input textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+}
+.member-props-memory-block {
+  margin-bottom: 16px;
+}
+.member-props-handoff-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.member-props-handoff-list li {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--line);
+}
+.member-props-handoff-list code {
+  font-size: 11.5px;
+  word-break: break-all;
+}
+.member-props-handoff-list span {
+  color: var(--ink-3);
+  flex: none;
+}
+.member-props-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.member-props-dirty,
+.member-props-footer-hint {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.member-props-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.member-props-diff-row pre {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+}
+.member-props-diff-modal {
+  max-width: calc(100vw - 32px);
+}
+.member-props-descriptions .ant-descriptions-item-label {
+  width: 96px;
+}
+
 .view-toolbar {
   display: flex;
   align-items: center;

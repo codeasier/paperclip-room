@@ -171,3 +171,92 @@ export interface WriteResponse {
   issue?: string;
   commentId?: string;
 }
+
+export type InstructionsMode = 'writable' | 'readonly' | 'unavailable';
+
+export interface MemberInstructions {
+  mode: InstructionsMode;
+  source?: string | null;
+  path?: string | null;
+  content?: string | null;
+  probeNote?: string | null;
+}
+
+export interface MemberRuntime {
+  model?: string | null;
+  timeoutSec?: number | null;
+  maxConcurrentRuns?: number | null;
+  maxConcurrentRunsPlatformDefault?: number | null;
+  maxConcurrentRunsCapped?: boolean;
+  warning?: string | null;
+}
+
+export interface MemberIdentity {
+  name: string;
+  title?: string | null;
+  instructions: MemberInstructions;
+}
+
+export interface MemorySessionReuse {
+  state: 'reused' | 'fresh' | 'unknown';
+  detail?: string | null;
+  source?: string | null;
+  asOf?: string | null;
+}
+
+export interface MemoryHandoffFile {
+  path: string;
+  mtime?: string | null;
+}
+
+export interface MemoryHandoff {
+  state: 'available' | 'empty' | 'unavailable';
+  files?: MemoryHandoffFile[];
+  source?: string | null;
+  asOf?: string | null;
+}
+
+export interface MemoryContextSize {
+  state: 'available' | 'empty' | 'unavailable';
+  approxChars?: number | null;
+  unit?: string | null;
+  source?: string | null;
+  asOf?: string | null;
+}
+
+export interface MemberMemory {
+  sessionReuse: MemorySessionReuse;
+  handoff: MemoryHandoff;
+  contextSize: MemoryContextSize;
+}
+
+export interface MemberConfig {
+  agentId: string;
+  companyId: string;
+  fetchedAt: string;
+  runtime: MemberRuntime;
+  identity: MemberIdentity;
+  memory: MemberMemory;
+}
+
+export type MemberConfigWritableKey =
+  'model' | 'timeoutSec' | 'maxConcurrentRuns' | 'name' | 'title' | 'instructions';
+
+export interface MemberConfigWriteBody {
+  agentId: string;
+  model?: string;
+  timeoutSec?: number;
+  maxConcurrentRuns?: number;
+  name?: string;
+  title?: string;
+  instructions?: string;
+}
+
+export interface MemberConfigWriteResponse {
+  ok: boolean;
+  applied?: MemberConfigWritableKey[];
+  error?: string;
+  field?: string;
+  runtime?: Partial<MemberRuntime>;
+  identity?: Partial<Pick<MemberIdentity, 'name' | 'title'>>;
+}

@@ -30,6 +30,11 @@ const CreateTaskModal = lazy(() =>
 const DetailDrawer = lazy(() =>
   import('../features/tasks/DetailDrawer').then((module) => ({ default: module.DetailDrawer })),
 );
+const MemberPropsDrawer = lazy(() =>
+  import('../features/agents/MemberPropsDrawer').then((module) => ({
+    default: module.MemberPropsDrawer,
+  })),
+);
 const OpsModal = lazy(() =>
   import('../features/ops/OpsModal').then((module) => ({ default: module.OpsModal })),
 );
@@ -225,6 +230,7 @@ function AgentWorkspace({
   const [tasksVisited, setTasksVisited] = useState(false);
   const [creating, setCreating] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [propsOpen, setPropsOpen] = useState(false);
   const tasks = useRoomQuery<TasksResponse>(
     '/api/tasks',
     company,
@@ -284,9 +290,24 @@ function AgentWorkspace({
         <Button
           className="panel-toggle"
           aria-expanded={detail !== null}
-          onClick={() => setDetail(detail ? null : { kind: 'overview' })}
+          aria-label="打开任务详情"
+          onClick={() => {
+            setPropsOpen(false);
+            setDetail(detail ? null : { kind: 'overview' });
+          }}
         >
           详情
+        </Button>
+        <Button
+          className="panel-toggle"
+          aria-expanded={propsOpen}
+          aria-label="打开成员属性"
+          onClick={() => {
+            setDetail(null);
+            setPropsOpen((open) => !open);
+          }}
+        >
+          属性
         </Button>
         <span
           className={`member-status ${agent.live.taskRunning ? 'running' : agent.live.backgroundRunning ? 'background' : ''}`}
@@ -310,7 +331,7 @@ function AgentWorkspace({
           <StatusTag status={agent.current.status} prefix="任务：" />
         </div>
       )}
-      <div className={`room-body ${detail ? 'detail-open' : ''}`}>
+      <div className={`room-body ${detail || propsOpen ? 'detail-open' : ''}`}>
         <div className="conversation-body">
           <div className="view-toolbar">
             <Tabs
@@ -319,6 +340,7 @@ function AgentWorkspace({
                 setView(value);
                 if (value === 'tasks') setTasksVisited(true);
                 setDetail(null);
+                setPropsOpen(false);
               }}
               items={[
                 { key: 'chat', label: '对话' },
@@ -361,7 +383,10 @@ function AgentWorkspace({
                     pending={tasks.isPending}
                     error={tasks.isError}
                     onRetry={() => void tasks.refetch()}
-                    onDetail={setDetail}
+                    onDetail={(next) => {
+                      setPropsOpen(false);
+                      setDetail(next);
+                    }}
                     selectedDetail={detail}
                     active={view === 'tasks'}
                   />
@@ -399,8 +424,21 @@ function AgentWorkspace({
                 agentName={agent.name}
                 tasks={tasks.data?.tasks || []}
                 detail={detail}
-                onChange={setDetail}
+                onChange={(next) => {
+                  setPropsOpen(false);
+                  setDetail(next);
+                }}
                 onClose={() => setDetail(null)}
+              />
+            </div>
+          )}
+          {propsOpen && (
+            <div className="detail-slot">
+              <MemberPropsDrawer
+                company={company}
+                agent={agent}
+                open={propsOpen}
+                onClose={() => setPropsOpen(false)}
               />
             </div>
           )}
