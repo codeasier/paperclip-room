@@ -200,19 +200,25 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
               }}
             />
             <div className="composer-footer">
-              {modelControl}
+              {/* #6 收窄：底栏左空；无 /、附件、语音、自动模式、第二选人 */}
+              <div className="composer-tools" data-testid="composer-tools" />
               <span className="composer-spacer" />
-              <span className="composer-counter">{draft.length}</span>
-              <Button
-                aria-label="发送"
-                type="primary"
-                loading={sending}
-                disabled={!enabled || !draft.trim()}
-                onClick={() => void send()}
-              >
-                <span className="send-label">发送</span>
-                <ArrowUpOutlined />
-              </Button>
+              <div className="composer-footer-right">
+                {modelControl}
+                <span className="composer-counter" aria-label="字数">
+                  {draft.length}
+                </span>
+                <Button
+                  aria-label="发送"
+                  type="primary"
+                  loading={sending}
+                  disabled={!enabled || !draft.trim()}
+                  onClick={() => void send()}
+                >
+                  <span className="send-label">发送</span>
+                  <ArrowUpOutlined />
+                </Button>
+              </div>
             </div>
           </div>
           <div className="composer-hint">

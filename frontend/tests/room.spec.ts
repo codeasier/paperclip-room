@@ -644,3 +644,31 @@ test('code fence card: label, copy failure, download body, empty fence skipped',
   expect(copyBox!.width).toBeGreaterThanOrEqual(32);
   expect(copyBox!.height).toBeGreaterThanOrEqual(32);
 });
+
+test('composer honest bar: empty left tools, model on right, no fake slash/attachments', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 760, height: 900 });
+  await fixture(page);
+  const footer = page.locator('.composer-footer');
+  const tools = footer.locator('[data-testid="composer-tools"]');
+  await expect(tools).toHaveCount(1);
+  await expect(tools).toBeEmpty();
+  // No fake capability affordances
+  await expect(page.getByRole('button', { name: /附件|语音|自动模式|快捷/ })).toHaveCount(0);
+  await expect(page.locator('.composer')).not.toContainText('/');
+  const input = page.getByRole('textbox', { name: '消息', exact: true });
+  await expect(input).toHaveAttribute('placeholder', /给 PL 发消息/);
+  await expect(input).not.toHaveAttribute('placeholder', /\//);
+  // Right cluster: model → counter → send
+  const right = footer.locator('.composer-footer-right');
+  await expect(right.getByRole('combobox', { name: '成员模型' })).toBeVisible();
+  await input.fill('你好');
+  await expect(right.getByLabel('字数')).toHaveText('2');
+  await expect(right.getByRole('button', { name: '发送', exact: true })).toBeEnabled();
+  // No second agent picker in composer
+  await expect(page.locator('.composer .member-avatar, .composer [data-agent-pill]')).toHaveCount(
+    0,
+  );
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
