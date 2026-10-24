@@ -1,25 +1,7 @@
 import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Alert,
-  App,
-  Avatar,
-  Badge,
-  Button,
-  Empty,
-  Result,
-  Select,
-  Space,
-  Spin,
-  Tabs,
-  Typography,
-} from 'antd';
-import {
-  PlusOutlined,
-  ReloadOutlined,
-  SafetyCertificateOutlined,
-  TeamOutlined,
-} from '@ant-design/icons';
+import { Alert, App, Button, Empty, Result, Select, Space, Spin, Tabs, Typography } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import { apiUrl, getJSON, postJSON } from '../api/client';
 import type {
   Agent,
@@ -32,6 +14,8 @@ import type {
 import { useRoomQuery } from '../hooks/useRoomQuery';
 import { models } from '../lib/format';
 import { AgentSidebar } from '../features/agents/AgentSidebar';
+import { MemberAvatar, roleLabel } from '../components/MemberAvatar';
+import { StatusTag } from '../components/StatusTag';
 import { ChatPanel } from '../features/chat/ChatPanel';
 import type { Detail } from '../features/tasks/DetailDrawer';
 
@@ -135,6 +119,7 @@ function TeamWorkspace({
   const [selection, setSelection] = useState('');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [opsOpen, setOpsOpen] = useState(false);
+  const client = useQueryClient();
   const state = useRoomQuery<StateResponse>('/api/state', team.id, undefined, 5000);
   const ops = useRoomQuery<OpsResponse>('/api/ops', team.id, undefined, 30000);
   const agents = state.data?.agents || [];
@@ -146,33 +131,44 @@ function TeamWorkspace({
     <div className="room-app">
       <header className="app-header">
         <div className="brand">
-          <span className="brand-mark">
-            P<span>·</span>
-          </span>
-          <div>
-            <strong>Paperclip Room</strong>
-            <small>TEAM WORKSPACE</small>
-          </div>
+          <span className="brand-mark">{team.name.slice(0, 1).toUpperCase()}</span>
+          <Select
+            aria-label="选择团队"
+            className="team-select"
+            value={team.id}
+            onChange={onTeam}
+            variant="borderless"
+            options={teams.map((team) => ({ value: team.id, label: team.name }))}
+          />
+          <span className="workspace-name">团队工作室</span>
         </div>
-        <Select
-          aria-label="选择团队"
-          className="team-select"
-          value={team.id}
-          onChange={onTeam}
-          suffixIcon={<TeamOutlined />}
-          options={teams.map((team) => ({ value: team.id, label: team.name }))}
-        />
-        <div className="header-summary">
-          任务运行 {state.data?.liveTaskRunning || 0}{' '}
-          <span>
-            后台 {state.data?.liveBackgroundRunning || 0} · 排队 {state.data?.liveQueued || 0}
-          </span>
-        </div>
-        <Badge count={ops.data?.alerts.length || 0} size="small">
-          <Button icon={<SafetyCertificateOutlined />} onClick={() => setOpsOpen(true)}>
-            巡检
-          </Button>
-        </Badge>
+        <div className="header-spacer" />
+        <button
+          className="sync-label"
+          aria-label="刷新"
+          onClick={() =>
+            void client.invalidateQueries({ predicate: (query) => query.queryKey[1] === team.id })
+          }
+        >
+          {state.data
+            ? `已同步 ${state.data.serverTime || new Date(state.dataUpdatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}`
+            : '正在同步'}
+        </button>
+        <Button
+          className={`ops-chip ${ops.data?.alerts.length ? 'warn' : ''}`}
+          onClick={() => setOpsOpen(true)}
+        >
+          <span className="pulse" />
+          {ops.data?.alerts.length ? `巡检 ${ops.data.alerts.length} 项` : '巡检正常'}
+        </Button>
+        <span className="team-live">
+          <span className={`pulse ${state.data?.liveRunning ? 'running' : ''}`} />
+          {state.data?.liveRunning
+            ? `${state.data.liveTaskRunning} 个任务运行 · ${state.data.liveBackgroundRunning} 个后台运行`
+            : state.data?.liveQueued
+              ? `${state.data.liveQueued} 个排队`
+              : '团队待命'}
+        </span>
       </header>
       {state.isError && (
         <Alert
@@ -251,28 +247,52 @@ function AgentWorkspace({
       void message.error(error.message);
     },
   });
+  const runningText = agent.live.taskRunning
+    ? `${agent.live.taskRunning} 个任务运行`
+    : agent.live.backgroundRunning
+      ? `${agent.live.backgroundRunning} 个后台运行`
+      : agent.live.queued
+        ? `${agent.live.queued} 个排队`
+        : '待命中';
+  const modelPicker = (
+    <Select
+      className="model-select"
+      prefix={<span className="model-label">模型</span>}
+      aria-label="成员模型"
+      showSearch
+      value={agent.model}
+      loading={modelBusy}
+      disabled={modelBusy}
+      options={[...new Set([...models, ...(agent.model ? [agent.model] : [])])].map((value) => ({
+        value,
+        label: value.replace(/^volcengine\//, ''),
+      }))}
+      onChange={(value) => model.mutate(value)}
+    />
+  );
   return (
     <>
       <div className="member-header">
-        <Avatar shape="square" size={48} style={{ background: '#edf0ff', color: '#5264dc' }}>
-          {agent.name.slice(0, 2)}
-        </Avatar>
+        <MemberAvatar name={agent.name} size={36} />
         <div className="member-copy">
           <Typography.Title level={4}>{agent.name}</Typography.Title>
-          <Typography.Text type="secondary">{agent.title || '团队成员'}</Typography.Text>
+          <Typography.Text type="secondary">
+            {roleLabel(agent.name, agent.title)} · 名下 {agent.openCount || 0} 个未结任务 ·{' '}
+            {runningText === '待命中' ? '待命' : runningText}
+          </Typography.Text>
         </div>
-        <Badge
-          status={agent.live.running ? 'processing' : 'default'}
-          text={
-            agent.live.taskRunning
-              ? `任务运行 ${agent.live.taskRunning}`
-              : agent.live.backgroundRunning
-                ? `后台运行 ${agent.live.backgroundRunning}`
-                : agent.live.queued
-                  ? `排队中 ${agent.live.queued}`
-                  : '待命中'
-          }
-        />
+        <Button
+          className="panel-toggle"
+          aria-expanded={detail !== null}
+          onClick={() => setDetail(detail ? null : { kind: 'overview' })}
+        >
+          详情
+        </Button>
+        <span
+          className={`member-status ${agent.live.taskRunning ? 'running' : agent.live.backgroundRunning ? 'background' : ''}`}
+        >
+          {runningText}
+        </span>
       </div>
       {agent.lastRunError && agent.lastRunAgeMin != null && agent.lastRunAgeMin < 60 && (
         <Alert
@@ -282,106 +302,110 @@ function AgentWorkspace({
           description={agent.lastRunError}
         />
       )}
-      <div className="view-toolbar">
-        <Tabs
-          activeKey={view}
-          onChange={(value) => {
-            setView(value);
-            if (value === 'tasks') setTasksVisited(true);
-            setDetail(null);
-          }}
-          items={[
-            { key: 'chat', label: '对话' },
-            { key: 'tasks', label: '任务' },
-          ]}
-        />
-        <Space>
-          <Button
-            aria-label="刷新"
-            icon={<ReloadOutlined />}
-            onClick={() =>
-              void client.invalidateQueries({ predicate: (query) => query.queryKey[1] === company })
-            }
-          />
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreating(true)}>
-            新建任务
-          </Button>
-        </Space>
-      </div>
-      <div className="view-body">
-        <Suspense
-          fallback={
-            <div className="loading">
-              <Spin />
-            </div>
-          }
-        >
-          <div className="view-slot" hidden={view !== 'chat'}>
-            <ChatPanel
-              company={company}
-              agent={agent}
-              draft={draft}
-              onDraft={onDraft}
-              active={view === 'chat'}
+      {agent.current && (
+        <div className="task-context" title="这是当前名下未结任务；任务状态不代表成员正在执行。">
+          <span className="task-caption">当前名下任务</span>
+          <strong>{agent.current.identifier}</strong>
+          <span className="task-context-title">{agent.current.title}</span>
+          <StatusTag status={agent.current.status} prefix="任务：" />
+        </div>
+      )}
+      <div className={`room-body ${detail ? 'detail-open' : ''}`}>
+        <div className="conversation-body">
+          <div className="view-toolbar">
+            <Tabs
+              activeKey={view}
+              onChange={(value) => {
+                setView(value);
+                if (value === 'tasks') setTasksVisited(true);
+                setDetail(null);
+              }}
+              items={[
+                { key: 'chat', label: '对话' },
+                { key: 'tasks', label: '任务' },
+              ]}
             />
+            <span className="view-note">
+              {view === 'chat' ? '直接对话，不进入任务列表' : '任务与运行记录（只读）'}
+            </span>
+            <Space>
+              <Button icon={<PlusOutlined />} onClick={() => setCreating(true)}>
+                新建任务
+              </Button>
+            </Space>
           </div>
-          {(tasksVisited || view === 'tasks') && (
-            <div className="view-slot" hidden={view !== 'tasks'}>
-              <TaskPanel
+          <div className="view-body">
+            <Suspense
+              fallback={
+                <div className="loading">
+                  <Spin />
+                </div>
+              }
+            >
+              <div className="view-slot" hidden={view !== 'chat'}>
+                <ChatPanel
+                  company={company}
+                  agent={agent}
+                  draft={draft}
+                  onDraft={onDraft}
+                  active={view === 'chat'}
+                  modelControl={modelPicker}
+                />
+              </div>
+              {(tasksVisited || view === 'tasks') && (
+                <div className="view-slot" hidden={view !== 'tasks'}>
+                  <TaskPanel
+                    company={company}
+                    agent={agent}
+                    data={tasks.data}
+                    pending={tasks.isPending}
+                    error={tasks.isError}
+                    onRetry={() => void tasks.refetch()}
+                    onDetail={setDetail}
+                    selectedDetail={detail}
+                    active={view === 'tasks'}
+                  />
+                </div>
+              )}
+            </Suspense>
+          </div>
+          {view === 'tasks' && (
+            <footer className="task-footer">
+              任务时间线只读；可从顶部新建任务。
+              <Button type="link" onClick={() => setView('chat')}>
+                去对话
+              </Button>
+            </footer>
+          )}
+        </div>
+        <Suspense fallback={null}>
+          {creating && (
+            <CreateTaskModal
+              company={company}
+              agentId={agent.id}
+              agentName={agent.name}
+              onClose={() => setCreating(false)}
+              onCreated={() => {
+                setTasksVisited(true);
+                setView('tasks');
+              }}
+            />
+          )}
+          {detail && (
+            <div className="detail-slot">
+              <DetailDrawer
                 company={company}
-                agent={agent}
-                data={tasks.data}
-                pending={tasks.isPending}
-                error={tasks.isError}
-                onRetry={() => void tasks.refetch()}
-                onDetail={setDetail}
-                active={view === 'tasks'}
+                agentId={agent.id}
+                agentName={agent.name}
+                tasks={tasks.data?.tasks || []}
+                detail={detail}
+                onChange={setDetail}
+                onClose={() => setDetail(null)}
               />
             </div>
           )}
         </Suspense>
       </div>
-      <footer className="member-footer">
-        <Typography.Text type="secondary">成员模型</Typography.Text>
-        <Select
-          aria-label="成员模型"
-          showSearch
-          value={agent.model}
-          loading={modelBusy}
-          disabled={modelBusy}
-          options={[...new Set([...models, ...(agent.model ? [agent.model] : [])])].map(
-            (value) => ({ value, label: value }),
-          )}
-          onChange={(value) => model.mutate(value)}
-        />
-        <Typography.Text className="poll-hint" type="secondary">
-          定时同步 · 公开执行记录
-        </Typography.Text>
-      </footer>
-      <Suspense fallback={null}>
-        {creating && (
-          <CreateTaskModal
-            company={company}
-            agentId={agent.id}
-            agentName={agent.name}
-            onClose={() => setCreating(false)}
-            onCreated={() => {
-              setTasksVisited(true);
-              setView('tasks');
-            }}
-          />
-        )}
-        {detail && (
-          <DetailDrawer
-            company={company}
-            agentId={agent.id}
-            tasks={tasks.data?.tasks || []}
-            detail={detail}
-            onChange={setDetail}
-            onClose={() => setDetail(null)}
-          />
-        )}
-      </Suspense>
     </>
   );
 }

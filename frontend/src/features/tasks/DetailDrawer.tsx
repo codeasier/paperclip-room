@@ -1,35 +1,36 @@
 import { useEffect } from 'react';
-import {
-  Alert,
-  Button,
-  Checkbox,
-  Descriptions,
-  Divider,
-  Drawer,
-  Empty,
-  Progress,
-  Space,
-  Typography,
-} from 'antd';
+import { Button, Drawer } from 'antd';
 import type { RoomEvent, Task } from '../../api/types';
 import { Markdown } from '../../components/Markdown';
+import { MemberAvatar } from '../../components/MemberAvatar';
 import { StatusTag } from '../../components/StatusTag';
-import { dateLabel } from '../../lib/format';
+import { clockLabel, dateLabel, dayLabel, duration, runStatuses } from '../../lib/format';
+import { taskIntervals } from '../../lib/timeline';
 import { ExecutionProcess } from '../execution/ExecutionProcess';
 
 export type Detail =
+  | { kind: 'overview' }
   | { kind: 'task'; taskId: string; runId?: string }
   | { kind: 'run'; runId: string }
   | { kind: 'message'; event: RoomEvent };
 interface Props {
   company: string;
   agentId: string;
+  agentName: string;
   tasks: Task[];
   detail: Detail;
   onChange: (detail: Detail) => void;
   onClose: () => void;
 }
-export function DetailDrawer({ company, agentId, tasks, detail, onChange, onClose }: Props) {
+export function DetailDrawer({
+  company,
+  agentId,
+  agentName,
+  tasks,
+  detail,
+  onChange,
+  onClose,
+}: Props) {
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -37,7 +38,12 @@ export function DetailDrawer({ company, agentId, tasks, detail, onChange, onClos
     document.addEventListener('keydown', close);
     return () => document.removeEventListener('keydown', close);
   }, [onClose]);
-  const task = detail.kind === 'task' ? tasks.find((task) => task.id === detail.taskId) : undefined;
+  const task =
+    detail.kind === 'task'
+      ? tasks.find((task) => task.id === detail.taskId)
+      : detail.kind === 'run'
+        ? tasks.find((task) => task.attempts.some((run) => run.id === detail.runId))
+        : undefined;
   const memberRuns =
     task?.attempts
       .filter((run) => run.agentId === agentId)
@@ -50,183 +56,237 @@ export function DetailDrawer({ company, agentId, tasks, detail, onChange, onClos
       : detail.kind === 'task'
         ? detail.runId || memberRuns[0]?.id
         : undefined;
+  const elapsed = task
+    ? [...new Set(task.attempts.map((run) => run.agentId))]
+        .flatMap((id) => taskIntervals([task], id))
+        .reduce((sum, interval) => sum + (interval.measured ? interval.end - interval.start : 0), 0)
+    : 0;
   return (
     <Drawer
-      title={
-        detail.kind === 'message' ? '消息详情' : detail.kind === 'task' ? '任务详情' : '运行详情'
-      }
+      title="详情"
       open
       onClose={onClose}
-      size={560}
+      size="100%"
+      getContainer={false}
+      rootStyle={{ position: 'absolute' }}
+      mask={false}
+      push={false}
+      focusable={{ trap: false }}
+      closable={{ placement: 'end' }}
+      styles={{ wrapper: { boxShadow: 'none' } }}
       className="detail-drawer"
       destroyOnHidden
     >
+      {detail.kind === 'overview' && (
+        <div className="detail-empty">
+          <strong>详情</strong>
+          <span>点击消息、任务或运行查看对应详情。</span>
+        </div>
+      )}
       {detail.kind === 'message' && (
         <>
-          <Typography.Title level={4}>
+          <div className="detail-label">消息详情</div>
+          <div className="detail-route">
+            <MemberAvatar name={detail.event.sender?.name || '成员'} size={30} />
+            <span>→</span>
+            {(detail.event.recipients || [{ name: '任务讨论区' }]).slice(0, 2).map((item, index) =>
+              /讨论区$/.test(item.name) ? (
+                <span className="discussion-avatar" key={index}>
+                  #
+                </span>
+              ) : (
+                <MemberAvatar key={index} name={item.name} size={30} />
+              ),
+            )}
+          </div>
+          <div className="detail-address">
             {detail.event.sender?.name || '成员'} →{' '}
             {detail.event.recipients?.map((item) => item.name).join('、') || '任务讨论区'}
-          </Typography.Title>
-          <Typography.Paragraph type="secondary">{dateLabel(detail.event.ts)}</Typography.Paragraph>
-          <Markdown text={detail.event.text || ''} />
+          </div>
+          <div className="detail-topic">
+            来源：{detail.event.issue} ·{' '}
+            {detail.event.issueTitle || detail.event.text?.split('\n')[0]}
+          </div>
           <Button
-            className="section-gap"
+            type="link"
+            className="detail-source"
             onClick={() => onChange({ kind: 'task', taskId: detail.event.issueId })}
           >
             查看来源任务 {detail.event.issue}
           </Button>
-          <Divider />
-          <Typography.Title level={5}>精确运行回执</Typography.Title>
-          {detail.event.receipt?.state === 'matched' ? (
-            detail.event.receipt.runs.map((run) => (
-              <div className="receipt-row" key={run.runId}>
-                <strong>{run.agentName}</strong>
-                <StatusTag status={run.status} />
-                <span>{dateLabel(run.startedAt || run.createdAt)}</span>
-                {run.agentId === agentId && (
-                  <Button size="small" onClick={() => onChange({ kind: 'run', runId: run.runId })}>
-                    查看运行
-                  </Button>
-                )}
-              </div>
-            ))
-          ) : (
-            <Alert
-              type="info"
-              title={
-                detail.event.receipt?.state === 'unavailable'
-                  ? '回执暂不可用'
-                  : '当前有界窗口暂无精确接收记录'
-              }
-            />
-          )}
-          <Typography.Paragraph type="secondary" className="section-gap">
-            回执按评论 ID + 任务 ID 匹配；运行成功不等于已读或业务验收完成。
-          </Typography.Paragraph>
-        </>
-      )}
-      {detail.kind === 'task' &&
-        (task ? (
-          <>
-            <Typography.Text type="secondary">{task.identifier}</Typography.Text>
-            <Typography.Title level={4}>{task.title}</Typography.Title>
-            <Space wrap>
-              <StatusTag status={task.status} />
-              <Typography.Text>{task.priority}</Typography.Text>
-            </Space>
-            <Descriptions
-              className="section-gap"
-              column={1}
-              size="small"
-              items={[
-                {
-                  key: 'relation',
-                  label: '关联方式',
-                  children:
-                    (
-                      {
-                        assigned: '当前名下',
-                        authored: '参与讨论',
-                        addressed: '被点名',
-                        executed: '实际执行过',
-                      } as Record<string, string>
-                    )[task.relation] || task.relation,
-                },
-                { key: 'activity', label: '最近活动', children: dateLabel(task.lastActivityAt) },
-                {
-                  key: 'runs',
-                  label: '已知运行',
-                  children: `${task.runs.total} 次 · 活跃 ${task.runs.active} · 失败 ${task.runs.failed}`,
-                },
-                ...(task.parent
-                  ? [
-                      {
-                        key: 'parent',
-                        label: '父任务',
-                        children: `${task.parent.identifier} ${task.parent.title}`,
-                      },
-                    ]
-                  : []),
-              ]}
-            />
-            {!!task.children.total && (
+          <div className="detail-time">
+            {dayLabel(detail.event.ts)} {clockLabel(detail.event.ts)}
+          </div>
+          <div className="receipt-panel">
+            {detail.event.receipt?.state === 'matched' ? (
               <>
-                <Typography.Text>
-                  子任务 {task.children.done}/{task.children.total}
-                </Typography.Text>
-                <Progress percent={Math.round((task.children.done / task.children.total) * 100)} />
-              </>
-            )}
-            {task.checklist && (
-              <section className="section-gap">
-                <Typography.Title level={5}>
-                  检查项 {task.checklist.done}/{task.checklist.total}
-                </Typography.Title>
-                {task.checklist.items.map((item, index) => (
-                  <div key={index}>
-                    <Checkbox checked={item.done} disabled>
-                      {item.text}
-                    </Checkbox>
+                <strong>关联执行回执</strong>
+                {detail.event.receipt.runs.map((run) => (
+                  <div className="receipt-row" key={run.runId}>
+                    <strong>
+                      {run.agentName} · {runStatuses[run.status] || run.status}
+                    </strong>
+                    <small>
+                      开始：{dateLabel(run.startedAt)} · 结束：{dateLabel(run.finishedAt)}
+                    </small>
+                    <small>运行：{run.runId}</small>
+                    {run.agentId === agentId && (
+                      <Button
+                        size="small"
+                        onClick={() => onChange({ kind: 'run', runId: run.runId })}
+                      >
+                        查看运行
+                      </Button>
+                    )}
                   </div>
                 ))}
-                {(task.checklist.more > 0 || task.checklist.partial) && (
-                  <Typography.Text type="secondary">仅展示部分检查项</Typography.Text>
-                )}
-              </section>
+              </>
+            ) : (
+              <>
+                <strong>
+                  {detail.event.receipt?.state === 'unavailable' ? '回执暂不可用' : '暂无接收记录'}
+                </strong>
+                <div className="receipt-note">
+                  {detail.event.receipt?.state === 'unavailable'
+                    ? '运行记录获取失败，可等待自动刷新。'
+                    : '当前有界窗口暂无精确接收记录；不能据此判断无人接收。'}
+                </div>
+              </>
             )}
-            <Divider />
-            <Typography.Title level={5}>讨论（{task.comments.total}）</Typography.Title>
-            {task.comments.latest.map((comment) => (
-              <article className="task-comment" key={comment.id}>
-                <Space>
-                  <strong>{comment.author}</strong>
-                  <Typography.Text type="secondary">{dateLabel(comment.ts)}</Typography.Text>
-                </Space>
-                <Markdown text={comment.text} />
-                {comment.truncated && (
-                  <Typography.Text type="secondary">评论预览已截断</Typography.Text>
-                )}
-              </article>
-            ))}
-            {!task.comments.latest.length && (
-              <Typography.Text type="secondary">暂无讨论</Typography.Text>
-            )}
-            <Divider />
-            <Typography.Title level={5}>当前成员运行</Typography.Title>
-            <Space wrap>
-              {memberRuns.map((run) => (
-                <Button
-                  key={run.id}
-                  type={runId === run.id ? 'primary' : 'default'}
-                  size="small"
-                  onClick={() => onChange({ kind: 'task', taskId: task.id, runId: run.id })}
-                >
-                  {dateLabel(run.startedAt || run.createdAt)} · <StatusTag status={run.status} />
-                </Button>
-              ))}
-            </Space>
-            {!memberRuns.length && (
-              <Alert
-                type="info"
-                title="当前查询范围暂无该成员的运行记录"
-                description={
-                  task.attempts.length
-                    ? `其他执行成员：${[...new Set(task.attempts.map((run) => run.agentName))].join('、')}`
-                    : '不根据任务创建时间推算执行区间。'
+            <div className="receipt-note">
+              仅查询最近 200 条运行，非完整历史；运行状态不等于逐条已读或业务验收。
+            </div>
+          </div>
+          <Markdown text={detail.event.text || ''} />
+        </>
+      )}
+      {(detail.kind === 'task' || detail.kind === 'run') && (
+        <>
+          <div className="detail-label">
+            {task ? (runId ? '运行与任务详情' : '任务详情') : '运行详情'}
+          </div>
+          <h3 className="detail-title">
+            {task ? `${task.identifier} · ${task.title}` : '运行过程'}
+          </h3>
+          {task && (
+            <div className="detail-task-status">
+              <span>任务：</span>
+              <StatusTag status={task.status} />
+            </div>
+          )}
+          {runId ? (
+            <ExecutionProcess
+              key={`${agentId}:${runId}`}
+              company={company}
+              agentId={agentId}
+              runId={runId}
+              agentName={agentName}
+            />
+          ) : (
+            <div className="detail-no-run">
+              {task
+                ? `当前查询范围暂无 ${agentName} 的运行记录。${task.attempts.length ? `最近运行记录：${task.attempts[0].agentName} · ${runStatuses[task.attempts[0].status] || task.attempts[0].status}。` : ''}`
+                : '该任务不在当前详情查询范围内。'}
+            </div>
+          )}
+          {task && (
+            <div className="task-detail-facts">
+              <div className="task-facts">
+                优先级{' '}
+                {
+                  (
+                    { critical: 'P0', high: 'P1', medium: 'P2', low: 'P3' } as Record<
+                      string,
+                      string
+                    >
+                  )[task.priority || 'medium']
                 }
-              />
-            )}
-          </>
-        ) : (
-          <Empty description="该任务不在当前详情查询范围内" />
-        ))}
-      {runId && (
-        <ExecutionProcess
-          key={`${agentId}:${runId}`}
-          company={company}
-          agentId={agentId}
-          runId={runId}
-        />
+                {elapsed > 0 && (
+                  <>
+                    <br />
+                    窗口内累计执行 {duration(elapsed)}（并行运行分别计时）
+                  </>
+                )}
+                {task.relation === 'executed' && (
+                  <>
+                    <br />
+                    你曾执行过该任务（当前查询窗口内）
+                  </>
+                )}
+                {task.relation === 'authored' && (
+                  <>
+                    <br />
+                    你在该任务中发过言
+                  </>
+                )}
+                {task.relation === 'addressed' && (
+                  <>
+                    <br />
+                    该任务的消息点名了你
+                  </>
+                )}
+                {task.parent && (
+                  <>
+                    <br />
+                    父任务 {task.parent.identifier}
+                  </>
+                )}
+                {!!task.children.total && (
+                  <>
+                    <br />
+                    子任务 {task.children.done}/{task.children.total} 完成
+                  </>
+                )}
+              </div>
+              {task.checklist && (
+                <>
+                  <div className="task-sub">
+                    检查项 {task.checklist.done}/{task.checklist.total}
+                    {task.checklist.partial ? ' · 描述已截断' : ''}
+                  </div>
+                  <div className="task-checks">
+                    {task.checklist.items.map((item, index) => (
+                      <div className={`task-check ${item.done ? 'done' : ''}`} key={index}>
+                        <span aria-hidden="true">{item.done ? '✓' : '○'}</span>
+                        <span>{item.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {task.checklist.more > 0 && (
+                    <div className="task-facts">另有 {task.checklist.more} 项检查项未展示。</div>
+                  )}
+                </>
+              )}
+              {!!task.comments.latest.length && (
+                <>
+                  <div className="task-sub">最近讨论</div>
+                  {[...task.comments.latest].reverse().map((comment) => (
+                    <article className="task-comment" key={comment.id}>
+                      <div className="who">
+                        <strong>{comment.author}</strong>
+                        <span>
+                          {dayLabel(comment.ts)} {clockLabel(comment.ts)}
+                        </span>
+                      </div>
+                      <div className="task-comment-text">{comment.text}</div>
+                      {comment.truncated && <div className="task-facts">内容过长，已截断。</div>}
+                    </article>
+                  ))}
+                </>
+              )}
+              {!!task.runs.total && (
+                <>
+                  <div className="task-sub">运行（任务内所有成员）</div>
+                  <div className="task-facts">
+                    最近 {runStatuses[task.runs.lastStatus || ''] || '状态未知'} · 共{' '}
+                    {task.runs.total} 次{task.runs.failed ? `，失败 ${task.runs.failed} 次` : ''}
+                  </div>
+                  {task.runs.lastError && <div className="task-error">{task.runs.lastError}</div>}
+                </>
+              )}
+            </div>
+          )}
+        </>
       )}
     </Drawer>
   );

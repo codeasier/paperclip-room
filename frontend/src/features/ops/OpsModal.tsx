@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Empty, Modal, Space, Spin, Statistic, Typography } from 'antd';
+import { Alert, Button, Card, Modal, Spin } from 'antd';
 import type { OpsIssue, OpsResponse } from '../../api/types';
 import { useRoomQuery } from '../../hooks/useRoomQuery';
 
@@ -13,39 +13,43 @@ export function OpsModal({
 }) {
   const query = useRoomQuery<OpsResponse>('/api/ops', company, undefined, 30000);
   const data = query.data;
+  const empty = <div className="ops-empty">无</div>;
   function issues(title: string, items: OpsIssue[]) {
     return (
-      <section className="section-gap">
-        <Typography.Title level={5}>
+      <section className="ops-section">
+        <h4>
           {title}（{items.length}）
-        </Typography.Title>
-        {items.length ? (
-          items.map((item, index) => (
-            <div className="ops-row" key={item.id || `${item.identifier}:${index}`}>
-              <strong>
-                {item.identifier} · {item.title}
-              </strong>
-              <Typography.Paragraph type="secondary">
-                {item.action || item.prompt || item.waitingOn || item.owner || '未写明解除条件'}
-                {item.ageHours != null ? ` · 阻塞 ${item.ageHours}h` : ''}
-                {item.silentHours != null ? ` · 静默 ${item.silentHours}h` : ''}
-                {item.idleMinutes != null ? ` · 静默 ${Math.round(item.idleMinutes)} 分钟` : ''}
-              </Typography.Paragraph>
-            </div>
-          ))
-        ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无" />
-        )}
+        </h4>
+        <div className="ops-list">
+          {items.length
+            ? items.map((item, index) => (
+                <div className="ops-row" key={item.id || `${item.identifier}:${index}`}>
+                  <div className="ops-row-title">
+                    <code>{item.identifier}</code>
+                    <strong>{item.title}</strong>
+                  </div>
+                  <div className="ops-row-meta">
+                    {item.action || item.prompt || item.waitingOn || item.owner || '未写明解除条件'}
+                    {item.ageHours != null ? ` · 阻塞 ${item.ageHours}h` : ''}
+                    {item.silentHours != null ? ` · 静默 ${item.silentHours}h` : ''}
+                    {item.idleMinutes != null ? ` · 静默 ${Math.round(item.idleMinutes)} 分钟` : ''}
+                  </div>
+                </div>
+              ))
+            : empty}
+        </div>
       </section>
     );
   }
   return (
     <Modal
       title="团队巡检"
+      className="ops-modal"
+      centered
       open={open}
       onCancel={onClose}
-      footer={<Button onClick={onClose}>关闭</Button>}
-      width={800}
+      footer={null}
+      width={760}
     >
       {query.isPending && <Spin />}
       {query.isError && (
@@ -56,23 +60,22 @@ export function OpsModal({
         />
       )}
       {data && (
-        <>
+        <div className="ops-body">
           <div className="ops-stats">
-            <Card size="small">
-              <Statistic title="任务总数" value={data.tasks.total} />
-            </Card>
-            <Card size="small">
-              <Statistic title="阻塞" value={data.blocked.count} />
-            </Card>
-            <Card size="small">
-              <Statistic title="陈旧状态" value={data.tasks.stale.length} />
-            </Card>
-            <Card size="small">
-              <Statistic
-                title="近 24h 异常"
-                value={data.runs.recent.failed + data.runs.recent.timedOut}
-              />
-            </Card>
+            {[
+              { label: '任务总数', value: data.tasks.total },
+              { label: `阻塞 · 超 24h ${data.blocked.over24h}`, value: data.blocked.count },
+              { label: '陈旧 in_progress', value: data.tasks.stale.length },
+              {
+                label: `近 24h 异常 · 超时 ${data.runs.recent.timedOut} · 失败 ${data.runs.recent.failed}`,
+                value: data.runs.recent.failed + data.runs.recent.timedOut,
+              },
+            ].map((stat) => (
+              <Card size="small" key={stat.label}>
+                <b>{stat.value}</b>
+                <span>{stat.label}</span>
+              </Card>
+            ))}
           </div>
           {issues(
             '等你处理',
@@ -84,25 +87,32 @@ export function OpsModal({
             data.blocked.items.filter((item) => !item.onBoard),
           )}
           {issues('陈旧 in_progress', data.tasks.stale)}
-          <Typography.Title level={5}>配置预检</Typography.Title>
-          {data.preflight.map((item, index) => (
-            <Alert
-              key={index}
-              className="section-gap"
-              type="warning"
-              title={item.agent}
-              description={item.detail}
-            />
-          ))}
-          <Space orientation="vertical" className="full-width section-gap">
-            {data.alerts.map((item) => (
-              <Alert key={item.code} type="warning" title={item.message} />
-            ))}
-          </Space>
-          <Typography.Paragraph type="secondary" className="section-gap">
-            只读巡检；有界查询不代表全历史审计，不会修改任务或运行状态。
-          </Typography.Paragraph>
-        </>
+          <section className="ops-section">
+            <h4>配置预检（{data.preflight.length}）</h4>
+            <div className="ops-list">
+              {data.preflight.length
+                ? data.preflight.map((item, index) => (
+                    <div className="ops-row" key={index}>
+                      <strong>{item.agent}</strong>
+                      <div className="ops-row-meta">{item.detail}</div>
+                    </div>
+                  ))
+                : empty}
+            </div>
+          </section>
+          <section className="ops-section">
+            <h4>告警</h4>
+            <div className="ops-list">
+              {data.alerts.length
+                ? data.alerts.map((item) => (
+                    <div className="ops-row" key={item.code}>
+                      <div className="ops-row-meta">{item.message}</div>
+                    </div>
+                  ))
+                : empty}
+            </div>
+          </section>
+        </div>
       )}
     </Modal>
   );

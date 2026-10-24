@@ -17,18 +17,11 @@ export const statuses: Record<string, string> = {
   idle: '待命',
   error: '异常',
 };
-const colors: Record<string, string> = {
-  in_progress: 'processing',
-  running: 'processing',
-  in_review: 'purple',
-  blocked: 'warning',
-  done: 'success',
-  succeeded: 'success',
-  failed: 'error',
-  timed_out: 'error',
-  error: 'error',
-  queued: 'gold',
-};
-export function StatusTag({ status }: { status?: string }) {
-  return <Tag color={colors[status || '']}>{statuses[status || ''] || status || '未知'}</Tag>;
+export function StatusTag({ status, prefix = '' }: { status?: string; prefix?: string }) {
+  return (
+    <Tag className={`status-chip ${status || ''}`}>
+      {prefix}
+      {statuses[status || ''] || status || '未知'}
+    </Tag>
+  );
 }

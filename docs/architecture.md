@@ -27,7 +27,7 @@ Python ThreadingHTTPServer (backend/paperclip_room/http.py)
 - `frontend/src/lib/timeline.ts`：不依赖 UI 的区间、并行层级、成员筛选、时间窗口算法。
 - `frontend/src/components/`：跨业务共享的 Markdown 和状态组件。
 
-前端任务、详情、新建表单和巡检使用按需加载；Ant Design 负责通用交互，真实执行时间线保持独立组件。依赖通过 `frontend/package-lock.json` 锁定，`make check` 运行离线测试、类型检查和生产构建。
+前端任务、详情、新建表单和巡检使用按需加载；Ant Design 负责通用交互，真实执行时间线保持独立组件。视觉基准为迁移前 `c0abfcf`：CSS 变量维护橙色主题，保留 64px 顶栏、260px 成员栏、贴边工作区、820px 消息/记录区、日期分组与角色头像。任务列表使用语义化 React 记录行，不套用后台管理表格外观。依赖通过 `frontend/package-lock.json` 锁定，`make check` 运行离线测试、类型检查和生产构建。
 
 ## 本项目 HTTP 接口
 
@@ -128,7 +128,7 @@ Agent Chat 需要实例 Experimental 设置中的 `enableAgentChat` 已开启，
 - 对话每4秒轮询，切回对话时若超过3秒会强制刷新；新建任务成功后切换到任务标签并刷新任务进展/时间线。
 - 中央任务区支持记录列表和执行时间线；任务标签或详情打开时每8秒刷新任务数据。详情以评论或任务/运行 ID 绑定选择，切换成员/团队时关闭。
 - 中央运行记录只渲染摘要，工具与助手输出只在 Drawer 中渲染。点击任务选择当前成员最近一次运行，点击执行行选择指定运行；详情统一按需读 `/api/run`。`useInfiniteQuery` 加载原始消息游标页并按 ID 去重，活跃详情每8秒刷新。React 稳定 key 保留同一运行中工具的展开状态。
-- 对话/任务切换保留已挂载页面；聊天阅读时不强制滚到底部。Ant Design Drawer 管理焦点和遮罩，760px及以下使用全宽详情，Esc 或关闭返回中央区域。
+- 对话/任务切换保留已挂载页面；聊天阅读时不强制滚到底部。Ant Design Drawer 通过 `getContainer=false`、`mask=false` 内嵌在真实 flex 侧栏中（`width: clamp(280px, 38%, 480px)`），桌面挤压中央会话，不使用覆盖式遮罩；760px及以下隐藏中央会话、侧栏占全宽，Esc 或关闭返回中央区域。
 - 写操作通过 mutation 执行，关闭自动重试；网络或响应无法确认时保留输入并提示先核对实际结果。
 - Agent Chat 会话 ID、会话状态和消息不写入浏览器存储；只保存团队选择。
 

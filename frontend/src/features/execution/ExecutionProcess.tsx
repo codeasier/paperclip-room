@@ -1,19 +1,20 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { Alert, Button, Collapse, Empty, Space, Spin, Typography } from 'antd';
+import { Alert, Button, Collapse, Empty, Spin, Typography } from 'antd';
 import { apiUrl, getJSON } from '../../api/client';
 import type { ExecutionRun, TranscriptEntry } from '../../api/types';
 import { Markdown } from '../../components/Markdown';
-import { StatusTag } from '../../components/StatusTag';
-import { dateLabel } from '../../lib/format';
+import { dateLabel, runStatuses } from '../../lib/format';
 
 export function ExecutionProcess({
   company,
   agentId,
   runId,
+  agentName,
 }: {
   company: string;
   agentId: string;
   runId: string;
+  agentName: string;
 }) {
   const query = useInfiniteQuery({
     queryKey: ['/api/run', company, agentId, runId],
@@ -68,14 +69,29 @@ export function ExecutionProcess({
   );
   return (
     <section className="execution-process">
-      <Typography.Title level={5}>运行过程</Typography.Title>
-      <Space wrap>
-        <StatusTag status={run.status} />
-        <Typography.Text type="secondary">{dateLabel(run.ts)}</Typography.Text>
-      </Space>
-      <Typography.Paragraph type="secondary" className="run-id">
-        运行：{runId}
-      </Typography.Paragraph>
+      <div className="run-meta">
+        <strong>
+          {agentName} · {runStatuses[run.status] || run.status}
+        </strong>
+        <div className="task-facts">
+          开始：{dateLabel(run.ts)}
+          <br />
+          结束：
+          {run.finishedAt
+            ? dateLabel(run.finishedAt)
+            : ['running', 'cancelling'].includes(run.status)
+              ? '执行中'
+              : '未记录'}
+          <br />
+          运行：{runId}
+        </div>
+      </div>
+      <Typography.Title level={5}>工具调用与助手消息</Typography.Title>
+      {run.state !== 'available' && (
+        <div className="execution-warning">
+          {run.note || '会话详情不可用，仅展示已记录的运行结果。'}
+        </div>
+      )}
       {run.error && <Alert type="error" title={run.error} />}
       {query.isError && (
         <Alert
@@ -92,8 +108,8 @@ export function ExecutionProcess({
       )}
       {query.hasNextPage && (
         <Button
-          className="section-gap"
-          block
+          className="execution-more"
+          aria-label="加载本次运行更早的过程"
           loading={query.isFetchingNextPage}
           onClick={() => void query.fetchNextPage()}
         >
@@ -111,21 +127,41 @@ export function ExecutionProcess({
           );
         if (entry.kind === 'tool_result' && calls.has(entry.toolCallId)) return null;
         const result = entry.kind === 'tool_call' ? results.get(entry.toolCallId) : entry;
+        const terminal = !['running', 'queued', 'cancelling'].includes(run.status);
+        let preview = entry.text;
+        try {
+          const args = JSON.parse(entry.text);
+          preview = args.command || args.path || args.query || preview;
+        } catch {
+          /* plain tool arguments */
+        }
         return (
           <Collapse
             key={entry.id}
             className="tool-step"
             size="small"
+            expandIcon={() => (
+              <span className="tool-result-icon">
+                {result ? (result.isError ? '!' : '✓') : '›'}
+              </span>
+            )}
             items={[
               {
                 key: entry.id,
                 label: (
-                  <Space wrap>
+                  <span className="tool-label">
                     <strong>{entry.name || '工具'}</strong>
+                    <span className="tool-preview">{preview}</span>
                     <Typography.Text type={result?.isError ? 'danger' : 'secondary'}>
-                      {result ? (result.isError ? '返回错误' : '已返回') : '等待返回'}
+                      {result
+                        ? result.isError
+                          ? '执行报错'
+                          : '已返回'
+                        : terminal
+                          ? '未记录结果'
+                          : '执行中'}
                     </Typography.Text>
-                  </Space>
+                  </span>
                 ),
                 children: (
                   <>
@@ -148,19 +184,18 @@ export function ExecutionProcess({
           />
         );
       })}
-      {!entries.length &&
-        (run.summary?.text ? (
-          <article className="assistant-output">
-            <Typography.Text type="secondary">平台最终结果</Typography.Text>
-            <Markdown text={run.summary.text} />
-            {run.summary.truncated && <Typography.Text type="warning">内容已截断</Typography.Text>}
-          </article>
-        ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无公开过程记录" />
-        ))}
-      <Typography.Paragraph type="secondary" className="section-gap">
-        {run.note} 工具有返回记录不代表业务验收通过。
-      </Typography.Paragraph>
+      {run.summary?.text &&
+      !entries.some(
+        (entry) => entry.kind === 'assistant' && entry.text.trim() === run.summary!.text.trim(),
+      ) ? (
+        <article className="assistant-output">
+          <Typography.Text type="secondary">平台最终结果</Typography.Text>
+          <Markdown text={run.summary.text} />
+          {run.summary.truncated && <Typography.Text type="warning">内容已截断</Typography.Text>}
+        </article>
+      ) : !entries.length ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无公开过程记录" />
+      ) : null}
     </section>
   );
 }

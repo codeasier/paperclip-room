@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Empty, Select, Space, Tooltip, Typography } from 'antd';
+import { Button, Empty, Select, Tooltip, Typography } from 'antd';
 import { LeftOutlined, MinusOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
 import type { Task } from '../../api/types';
-import { dateLabel, duration } from '../../lib/format';
+import { dateLabel, duration, runStatuses } from '../../lib/format';
 import { placeIntervals, taskIntervals, timeWindow } from '../../lib/timeline';
-import { StatusTag } from '../../components/StatusTag';
+import { StatusTag, statuses } from '../../components/StatusTag';
 
 interface Props {
   tasks: Task[];
@@ -38,10 +38,22 @@ export function TaskTimeline({ tasks, agentId, agentName, onTask, onRun }: Props
   const drawnTasks = tasks.filter((task) =>
     visible.some((interval) => interval.task.id === task.id),
   );
+  function executionNote(task: Task) {
+    const own = task.attempts.filter((run) => run.agentId === agentId);
+    if (own.length)
+      return `已记录 ${agentName} 的 ${own.length} 次运行，但缺少可用时间，无法绘制时间条。`;
+    const latest = [...task.attempts].sort((a, b) =>
+      (b.finishedAt || b.startedAt || b.createdAt || '').localeCompare(
+        a.finishedAt || a.startedAt || a.createdAt || '',
+      ),
+    )[0];
+    return `当前查询范围暂无 ${agentName} 的运行记录。${latest ? `最近运行记录：${latest.agentName} · ${runStatuses[latest.status] || latest.status}。` : ''}`;
+  }
   return (
     <div className="task-timeline">
       <div className="trace-toolbar">
-        <Space wrap>
+        <span>{agentName} · 执行时间线</span>
+        <>
           <Select
             aria-label="时间范围"
             value={hours}
@@ -65,8 +77,8 @@ export function TaskTimeline({ tasks, agentId, agentName, onTask, onRun }: Props
           <Button
             aria-label="下一时间窗口"
             icon={<RightOutlined />}
-            disabled={hours === 'all'}
-            onClick={() => setOffset(offset + 1)}
+            disabled={hours === 'all' || offset === 0}
+            onClick={() => setOffset(Math.min(0, offset + 1))}
           />
           <Button
             aria-label="缩小"
@@ -74,6 +86,7 @@ export function TaskTimeline({ tasks, agentId, agentName, onTask, onRun }: Props
             disabled={zoom === 1}
             onClick={() => setZoom(Math.max(1, zoom / 2))}
           />
+          <Typography.Text type="secondary">{zoom}×</Typography.Text>
           <Button
             aria-label="放大"
             icon={<PlusOutlined />}
@@ -88,33 +101,20 @@ export function TaskTimeline({ tasks, agentId, agentName, onTask, onRun }: Props
           >
             适应
           </Button>
-          <Typography.Text type="secondary">{zoom}×</Typography.Text>
-        </Space>
+        </>
       </div>
       <Typography.Paragraph type="secondary">
-        {dateLabel(window.start)} — {dateLabel(window.end)} · 当前成员已知执行累计{' '}
-        {duration(
-          visible.reduce(
-            (sum, interval) =>
-              sum +
-              (interval.measured
-                ? Math.max(
-                    0,
-                    Math.min(interval.end, window.end) - Math.max(interval.start, window.start),
-                  )
-                : 0),
-            0,
-          ),
-        )}
+        {dateLabel(window.start)} — {dateLabel(window.end)} · {visible.length}/{intervals.length}{' '}
+        次运行{offset === 0 ? ' · 以最近运行定位' : ''}
       </Typography.Paragraph>
       <div className="trace-scroll">
         <div ref={canvas} className="trace-canvas" style={{ width: `${zoom * 100}%` }}>
           <div className="trace-axis">
-            <span>任务 / 真实运行</span>
+            <span>任务 / {agentName}</span>
             <div>
               {Array.from({ length: 5 }, (_, index) => (
-                <time key={index} style={{ left: `${index * 25}%` }}>
-                  {new Date(window.start + (span * index) / 4).toLocaleTimeString('zh-CN', {
+                <time key={index} style={{ left: `${10 + index * 20}%` }}>
+                  {new Date(window.start + span * (0.1 + index * 0.2)).toLocaleTimeString('zh-CN', {
                     hour: '2-digit',
                     minute: '2-digit',
                     hour12: false,
@@ -130,7 +130,7 @@ export function TaskTimeline({ tasks, agentId, agentName, onTask, onRun }: Props
               <div
                 key={task.id}
                 className="trace-row"
-                style={{ minHeight: Math.max(64, lanes * 34 + 16) }}
+                style={{ minHeight: Math.max(56, lanes * 30 + 12) }}
               >
                 <button className="trace-label" onClick={() => onTask(task)}>
                   <strong>{task.identifier}</strong>
@@ -158,11 +158,13 @@ export function TaskTimeline({ tasks, agentId, agentName, onTask, onRun }: Props
                           style={{
                             left: `calc(${left}% - ${interval.measured ? 0 : 6}px)`,
                             width: interval.measured ? `max(12px, ${width}%)` : 12,
-                            top: 8 + interval.lane * 34,
+                            top: 6 + interval.lane * 30,
                           }}
                           onClick={() => onRun(interval.run.id, task)}
                         >
-                          {interval.measured ? '运行' : ''}
+                          {interval.measured
+                            ? `${interval.run.status === 'succeeded' ? '运行成功' : statuses[interval.run.status] || interval.run.status} · ${duration(interval.end - interval.start)}`
+                            : ''}
                         </button>
                       </Tooltip>
                     );
@@ -180,26 +182,33 @@ export function TaskTimeline({ tasks, agentId, agentName, onTask, onRun }: Props
         </div>
       </div>
       {unmeasured.length > 0 && (
-        <section className="section-gap">
-          <Typography.Title level={5}>暂无可绘制时间的关联任务</Typography.Title>
+        <section className="unmeasured-section">
+          <Typography.Title level={5}>
+            关联任务 · 无可绘制的 {agentName} 执行时间（{unmeasured.length}）
+          </Typography.Title>
           {unmeasured.map((task) => (
             <button key={task.id} className="unmeasured-task" onClick={() => onTask(task)}>
-              <span>
-                <strong>{task.identifier}</strong> {task.title}
+              <span className="unmeasured-info">
+                <span className="unmeasured-title">
+                  <strong>{task.identifier}</strong> {task.title}
+                </span>
+                <small>{executionNote(task)}</small>
               </span>
-              <StatusTag status={task.status} />
-              <small>
-                {task.attempts.some((run) => run.agentId === agentId)
-                  ? `已记录 ${agentName} 的运行，但缺少可用时间`
-                  : `暂无 ${agentName} 的运行记录`}
-                {task.attempts.some((run) => run.agentId !== agentId)
-                  ? `；其他成员：${[...new Set(task.attempts.filter((run) => run.agentId !== agentId).map((run) => run.agentName))].join('、')}`
-                  : ''}
-              </small>
+              <StatusTag status={task.status} prefix="任务：" />
             </button>
           ))}
         </section>
       )}
+      <div className="trace-legend">
+        <span className="running">执行中（至当前）</span>
+        <span className="succeeded">成功</span>
+        <span className="failed">失败 / 超时</span>
+        <span className="queued">排队 / 未知区间为时间点</span>
+      </div>
+      <p className="trace-scope">
+        时间条仅表示 {agentName}{' '}
+        的实际运行；任务状态不代表正在执行。“全部状态”仍按当前成员和所选时间范围展示运行。全部记录仍受后端查询窗口限制。
+      </p>
     </div>
   );
 }

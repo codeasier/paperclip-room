@@ -1,5 +1,6 @@
-import { Avatar, Badge, Empty, Typography } from 'antd';
+import { Empty } from 'antd';
 import type { Agent } from '../../api/types';
+import { MemberAvatar, roleLabel } from '../../components/MemberAvatar';
 
 export function AgentSidebar({
   agents,
@@ -13,59 +14,56 @@ export function AgentSidebar({
   return (
     <aside className="agent-sidebar" aria-label="团队成员">
       <div className="sidebar-heading">
-        <Typography.Text type="secondary">团队成员</Typography.Text>
-        <span>{agents.length}</span>
+        团队成员 <span>{agents.length}</span>
       </div>
-      <nav className="agent-list">
+      <nav className="agent-list" aria-label="选择智能体">
         {!agents.length && (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="团队暂无成员" />
         )}
-        {agents.map((agent) => (
-          <button
-            key={agent.id}
-            className={`agent-item ${selected === agent.id ? 'selected' : ''}`}
-            onClick={() => onSelect(agent.id)}
-            aria-pressed={selected === agent.id}
-          >
-            <Badge
-              dot
-              status={
-                agent.live.running ? 'processing' : agent.status === 'error' ? 'error' : 'default'
-              }
+        {agents.map((agent) => {
+          const state = agent.live.taskRunning
+            ? 'running'
+            : agent.live.backgroundRunning
+              ? 'background'
+              : agent.live.queued
+                ? 'queued'
+                : 'idle';
+          const title = agent.current
+            ? `${agent.current.identifier} · ${agent.current.title}`
+            : '暂无在办任务';
+          return (
+            <button
+              key={agent.id}
+              className={`agent-item ${selected === agent.id ? 'selected' : ''}`}
+              onClick={() => onSelect(agent.id)}
+              aria-pressed={selected === agent.id}
+              aria-label={`${agent.name} · ${roleLabel(agent.name, agent.title)}`}
+              title={title}
             >
-              <Avatar
-                shape="square"
-                size={40}
-                style={{
-                  background: selected === agent.id ? '#5264dc' : '#e9edf5',
-                  color: selected === agent.id ? '#fff' : '#526175',
-                }}
-              >
-                {agent.name.slice(0, 2)}
-              </Avatar>
-            </Badge>
-            <span className="agent-copy">
-              <strong>{agent.name}</strong>
-              <span>{agent.title || '团队成员'}</span>
-              <small>
-                {agent.live.taskRunning
-                  ? `任务运行 ${agent.live.taskRunning}`
-                  : agent.live.backgroundRunning
-                    ? `后台运行 ${agent.live.backgroundRunning}`
-                    : agent.live.queued
-                      ? `排队 ${agent.live.queued}`
-                      : '待命中'}
-              </small>
-            </span>
-            <span className="agent-count">{agent.openCount}</span>
-          </button>
-        ))}
+              <MemberAvatar name={agent.name} status={state} />
+              <span className="agent-copy">
+                <span className="agent-top">
+                  <strong>{agent.name}</strong>
+                  <span>{roleLabel(agent.name, agent.title)}</span>
+                </span>
+                <span className={`agent-task ${state}`}>
+                  <span>{title}</span>
+                  {state !== 'idle' && (
+                    <small>
+                      {agent.live.taskRunning
+                        ? `${agent.live.taskRunning} 任务运行`
+                        : agent.live.backgroundRunning
+                          ? `${agent.live.backgroundRunning} 后台运行`
+                          : `${agent.live.queued} 排队`}
+                    </small>
+                  )}
+                </span>
+              </span>
+            </button>
+          );
+        })}
       </nav>
-      <div className="sidebar-footer">
-        Paperclip Room
-        <br />
-        <small>团队协作 · 执行可见</small>
-      </div>
+      <div className="sidebar-footer">{agents.length} 个成员 · 当前团队</div>
     </aside>
   );
 }

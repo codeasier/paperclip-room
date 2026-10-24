@@ -57,10 +57,11 @@ export function timeWindow(
   const latest = Math.max(...intervals.map((interval) => interval.end));
   if (hours === 'all') {
     const start = Math.min(...intervals.map((interval) => interval.start));
-    return { start, end: Math.max(start + 60000, latest) };
+    const span = Math.max(60000, latest - start);
+    return { start: start - span * 0.025, end: start + span * 1.025 };
   }
   const span = hours * 3600000;
-  const end = latest + Math.min(span * 0.02, 60000) + offset * span;
+  const end = latest + span * 0.025 + offset * span;
   return { start: end - span, end };
 }
 
@@ -72,6 +73,10 @@ export function filterTasks(tasks: Task[], agentId: string, search: string, stat
       (status === 'all' ||
         (status === 'active'
           ? task.attempts.some((run) => run.agentId === agentId && activeStates.has(run.status))
-          : task.status === status)),
+          : status === 'open'
+            ? !['done', 'cancelled'].includes(task.status)
+            : status === 'done'
+              ? ['done', 'cancelled'].includes(task.status)
+              : task.status === status)),
   );
 }

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 
 const now = Date.now() - 300000;
 const iso = (offset: number) => new Date(now + offset).toISOString();
@@ -138,6 +139,14 @@ async function fixture(page: Page) {
       '/api/room': {
         events: [
           {
+            kind: 'issue',
+            issueId: 'one',
+            issue: 'HER-1',
+            title: task.title,
+            status: task.status,
+            ts: iso(0),
+          },
+          {
             id: 'comment',
             kind: 'comment',
             issueId: 'one',
@@ -176,14 +185,124 @@ async function fixture(page: Page) {
   return writes;
 }
 
+// The pre-migration HTML is an immutable design reference. Both pages receive the same API
+// fixtures, so layout and screenshots can be compared without changing live tasks or messages.
+for (const width of [1440, 390]) {
+  test(`legacy appearance comparison across every workspace page at ${width}px`, async ({
+    page,
+    context,
+  }, testInfo) => {
+    const html = execFileSync('git', ['show', 'c0abfcf:index.html'], { encoding: 'utf8' });
+    const legacy = await context.newPage();
+    await legacy.route('http://127.0.0.1:4173/', (route) =>
+      route.fulfill({ contentType: 'text/html', body: html }),
+    );
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    legacy.on('pageerror', (error) => errors.push(`legacy: ${error.message}`));
+    for (const current of [legacy, page]) await current.setViewportSize({ width, height: 1000 });
+    await fixture(legacy);
+    await fixture(page);
+    const capture = async (name: string) => {
+      for (const [version, current] of [
+        ['legacy', legacy],
+        ['react', page],
+      ] as const) {
+        const path = testInfo.outputPath(`${name}-${version}-${width}.png`);
+        await current.screenshot({ path, animations: 'disabled' });
+        await testInfo.attach(`${name}-${version}`, { path, contentType: 'image/png' });
+        expect(
+          await current.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+        ).toBe(true);
+      }
+    };
+    const originalHeader = await legacy.locator('header').boundingBox();
+    const currentHeader = await page.locator('.app-header').boundingBox();
+    expect(currentHeader!.height).toBe(originalHeader!.height);
+    if (width > 760) {
+      expect((await page.locator('.agent-sidebar').boundingBox())!.width).toBe(
+        (await legacy.locator('aside').boundingBox())!.width,
+      );
+      expect(
+        await page
+          .locator('.main-panel')
+          .evaluate((element) => getComputedStyle(element).borderRadius),
+      ).toBe('0px');
+    }
+    expect(
+      await page
+        .locator('.brand-mark')
+        .evaluate((element) => getComputedStyle(element).backgroundColor),
+    ).toBe(
+      await legacy
+        .locator('.mark')
+        .evaluate((element) => getComputedStyle(element).backgroundColor),
+    );
+    await capture('chat');
+    await legacy.locator('#view-tasks').click();
+    await page.getByRole('tab', { name: '任务', exact: true }).click();
+    await expect(legacy.locator('#stream .comm')).toBeVisible();
+    await expect(page.locator('.record-button.message')).toBeVisible();
+    await capture('task-list');
+    expect(await page.locator('.task-panel table').count()).toBe(0);
+    await expect(page.locator('.record-route .member-avatar')).toHaveCount(2);
+    const before = await page.locator('.conversation-body').boundingBox();
+    await legacy
+      .locator('#stream .comm-summary')
+      .filter({ has: legacy.locator('.comm-route') })
+      .click();
+    await page.getByRole('button', { name: /^PL → QA：/ }).click();
+    await expect(page.locator('.detail-slot')).toBeVisible();
+    if (width > 760) {
+      const after = await page.locator('.conversation-body').boundingBox();
+      const panel = await page.locator('.detail-slot').boundingBox();
+      expect(Math.abs(after!.width + panel!.width - before!.width)).toBeLessThan(2);
+      expect(after!.width).toBeLessThan(before!.width - 280);
+      const originalPanel = await legacy.locator('#sidepanel').boundingBox();
+      expect(Math.abs(panel!.width - originalPanel!.width)).toBeLessThan(2);
+    } else await expect(page.locator('.conversation-body')).toBeHidden();
+    await capture('message-detail');
+    await legacy.locator('#closepanel').click();
+    await page.keyboard.press('Escape');
+    await legacy.locator('#tasks-trace-view').click();
+    await page.getByText('时间线', { exact: true }).click();
+    await expect(page.getByTestId('trace-run')).toHaveCount(2);
+    await capture('task-timeline');
+    await legacy.locator('[data-trace-run]').first().click();
+    await page.getByTestId('trace-run').first().click();
+    await expect(page.getByText('当前助手消息', { exact: true })).toBeVisible();
+    await capture('execution-detail');
+    await legacy.locator('#closepanel').click();
+    await page.keyboard.press('Escape');
+    await legacy.locator('#newtask').click();
+    await page.getByRole('button', { name: '新建任务' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await capture('create-task');
+    expect(await page.locator('.ant-modal').evaluate((element) => element.clientWidth)).toBe(
+      await legacy.locator('#taskmodal .modal').evaluate((element) => element.clientWidth),
+    );
+    await legacy.locator('#taskcancel').click();
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+    await legacy.locator('#opschip').click();
+    await page.getByRole('button', { name: /巡检/ }).click();
+    await expect(page.getByText('任务总数', { exact: true })).toBeVisible();
+    await capture('ops');
+    expect(await page.locator('.ant-modal').evaluate((element) => element.clientWidth)).toBe(
+      await legacy.locator('#opsmodal .modal').evaluate((element) => element.clientWidth),
+    );
+    expect(errors).toEqual([]);
+    await legacy.close();
+  });
+}
+
 test('draft isolation, IME guard, chat send and explicit task creation', async ({ page }) => {
   const writes = await fixture(page);
   const input = page.getByRole('textbox', { name: '消息', exact: true });
   await input.fill('PL 草稿');
-  await page.getByRole('button', { name: /QA 团队成员/ }).click();
+  await page.getByRole('button', { name: /^QA ·/ }).click();
   await expect(input).toHaveValue('');
   await input.fill('QA 草稿');
-  await page.getByRole('button', { name: /PL 团队成员/ }).click();
+  await page.getByRole('button', { name: /^PL ·/ }).click();
   await expect(input).toHaveValue('PL 草稿');
   await input.dispatchEvent('compositionstart');
   await input.press('Enter');
@@ -213,7 +332,7 @@ test('task timeline, details, tool pairing, pagination and current-member filter
   page.on('pageerror', (error) => errors.push(error.message));
   await fixture(page);
   await page.getByRole('tab', { name: '任务', exact: true }).click();
-  await page.getByText('PL → QA：给 QA', { exact: false }).click();
+  await page.getByRole('button', { name: /^PL → QA：/ }).click();
   await expect(page.getByText('当前有界窗口暂无精确接收记录')).toBeVisible();
   await page.getByRole('button', { name: '查看来源任务 HER-1' }).click();
   await expect(page.getByText('当前助手消息', { exact: true })).toBeVisible();
@@ -276,9 +395,9 @@ test('late member response cannot replace the currently selected member', async 
       })
       .catch(() => {});
   });
-  await page.getByRole('button', { name: /QA 团队成员/ }).click();
+  await page.getByRole('button', { name: /^QA ·/ }).click();
   await requested;
-  await page.getByRole('button', { name: /PL 团队成员/ }).click();
+  await page.getByRole('button', { name: /^PL ·/ }).click();
   release();
   await expect(page.getByText('你好，准备开始。')).toBeVisible();
   await expect(page.getByText('延迟的 QA 回复')).toHaveCount(0);
