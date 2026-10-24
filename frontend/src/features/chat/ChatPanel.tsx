@@ -134,7 +134,7 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
                     </div>
                     <div className="message-bubble">
                       {item.author === 'user' ? (
-                        <div className="user-text">{item.text}</div>
+                        <Markdown text={item.text} variant="user" />
                       ) : (
                         <Markdown text={item.text} />
                       )}

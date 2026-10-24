@@ -1751,6 +1751,36 @@ a:focus-visible {
 .markdown img {
   max-width: 100%;
 }
+/* #7 user-bubble MD: tighter density on accent-weak orange */
+.markdown--user p {
+  margin: 0 0 7px;
+}
+.markdown--user h3 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 10px 0 6px;
+  line-height: 1.35;
+}
+.markdown--user h4,
+.markdown--user h5 {
+  font-size: 13.5px;
+  font-weight: 600;
+  margin: 8px 0 5px;
+  line-height: 1.4;
+}
+.markdown--user code {
+  background: #e6eaf0;
+  color: #6f4524;
+}
+.markdown--user pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: #f6ebe3;
+  border-color: #e8c9b5;
+}
+.markdown--user pre code {
+  color: var(--ink, #242b36);
+}
 .code-card {
   margin: 11px 0;
   border: 1px solid var(--line-2, #dfe3e9);

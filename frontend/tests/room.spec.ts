@@ -672,3 +672,228 @@ test('composer honest bar: empty left tools, model on right, no fake slash/attac
   );
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('user markdown: strong/list/code, skipHtml, no code-card, agent fence regression, ≤760', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 760, height: 900 });
+  const userSample = ['请按下列做：', '- 先改 **Composer**', '- 再跑 `npm test`'].join('\n');
+  const xssSample = '<img src=x onerror=alert(1)>';
+  const userFence = ['说明：', '```ts', 'const a = 1;', '```'].join('\n');
+  const agentFence = ['Agent 回复', '', '```js', 'console.log(1)', '```'].join('\n');
+
+  let posted: string[] = [];
+  const messages: {
+    id: string;
+    author: string;
+    authorName: string;
+    text: string;
+    ts: string;
+    truncated?: boolean;
+  }[] = [
+    {
+      id: 'agent-fence',
+      author: 'agent',
+      authorName: 'PL',
+      text: agentFence,
+      ts: new Date().toISOString(),
+    },
+  ];
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'POST' && url.pathname === '/api/chat') {
+      const body = request.postDataJSON() as { text: string };
+      posted.push(body.text);
+      messages.push({
+        id: `user-${posted.length}`,
+        author: 'user',
+        authorName: '我',
+        text: body.text,
+        ts: new Date().toISOString(),
+      });
+      await route.fulfill({ json: { ok: true } });
+      return;
+    }
+    if (request.method() === 'POST') {
+      await route.fulfill({ json: { ok: true } });
+      return;
+    }
+    const payload: Record<string, unknown> = {
+      '/api/teams': { default: 'c1', teams: [{ id: 'c1', name: 'Hermes Lab' }] },
+      '/api/state': {
+        companyId: 'c1',
+        agents: [
+          {
+            id: 'pl',
+            name: 'PL',
+            title: '团队成员',
+            status: 'idle',
+            model: 'glm-5.3',
+            openCount: 0,
+            live: { running: 0, queued: 0, taskRunning: 0, backgroundRunning: 0, runs: [] },
+            current: null,
+          },
+        ],
+        liveRunning: 0,
+        liveQueued: 0,
+        liveTaskRunning: 0,
+        liveBackgroundRunning: 0,
+      },
+      '/api/chat': { state: 'available', messages },
+      '/api/tasks': { state: 'available', tasks: [], note: '' },
+      '/api/ops': {
+        tasks: { total: 0, stale: [], awaiting: [] },
+        blocked: { count: 0, onBoard: 0, over24h: 0, items: [] },
+        runs: { recent: { hours: 24, failed: 0, timedOut: 0 } },
+        alerts: [],
+        preflight: [],
+      },
+    };
+    await route.fulfill({ json: payload[url.pathname] || {} });
+  });
+
+  // Catch XSS execution
+  let alerted = false;
+  page.on('dialog', async (dialog) => {
+    alerted = true;
+    await dialog.dismiss();
+  });
+
+  await page.goto('/');
+  // Agent fence regression: CodeFenceCard still present
+  await expect(page.locator('.chat-message.agent .code-card')).toHaveCount(1);
+  await expect(
+    page.locator('.chat-message.agent .code-card').getByRole('button', { name: '复制代码' }),
+  ).toBeVisible();
+
+  const input = page.getByRole('textbox', { name: '消息', exact: true });
+
+  // Designer §8 sample
+  await input.fill(userSample);
+  await page.getByRole('button', { name: '发送', exact: true }).click();
+  const userBubble = page.locator('.chat-message.user').last();
+  await expect(userBubble.locator('.markdown--user')).toBeVisible();
+  // Optimistic / first paint: never .user-text
+  await expect(userBubble.locator('.user-text')).toHaveCount(0);
+  await expect(userBubble.locator('.markdown--user strong')).toHaveText('Composer');
+  await expect(userBubble.locator('.markdown--user li')).toHaveCount(2);
+  await expect(userBubble.locator('.markdown--user code')).toHaveText('npm test');
+  // Orange bubble unchanged
+  await expect(userBubble.locator('.message-bubble')).toHaveCSS(
+    'background-color',
+    'rgb(255, 244, 236)',
+  );
+
+  // XSS string must not execute (skipHtml may strip HTML-only nodes entirely)
+  await input.fill(xssSample);
+  await page.getByRole('button', { name: '发送', exact: true }).click();
+  const xssBubble = page.locator('.chat-message.user').last();
+  await expect(xssBubble.locator('.markdown--user')).toBeVisible();
+  await expect(xssBubble.locator('img[onerror]')).toHaveCount(0);
+  await expect(xssBubble.locator('img')).toHaveCount(0);
+  expect(alerted).toBe(false);
+  // Mixed prose + HTML: surrounding text survives, img still not executed
+  await input.fill(`看看 ${xssSample} 结尾`);
+  await page.getByRole('button', { name: '发送', exact: true }).click();
+  const mixed = page.locator('.chat-message.user').last();
+  await expect(mixed.locator('.markdown--user')).toContainText('看看');
+  await expect(mixed.locator('.markdown--user')).toContainText('结尾');
+  await expect(mixed.locator('img')).toHaveCount(0);
+  expect(alerted).toBe(false);
+
+  // User fence → no CodeFenceCard
+  await input.fill(userFence);
+  await page.getByRole('button', { name: '发送', exact: true }).click();
+  const fenceBubble = page.locator('.chat-message.user').last();
+  await expect(fenceBubble.locator('.markdown--user')).toBeVisible();
+  await expect(fenceBubble.locator('.code-card')).toHaveCount(0);
+  await expect(fenceBubble.locator('.markdown--user pre code')).toContainText('const a = 1;');
+  // Agent card still present (not wiped by variant mix-up)
+  await expect(page.locator('.chat-message.agent .code-card')).toHaveCount(1);
+
+  // Narrow: no horizontal page overflow
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('user markdown optimistic: sent bubble is markdown--user without user-text flash', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 760, height: 900 });
+  const sample = '**立刻**可见';
+  let chatMessages: {
+    id: string;
+    author: string;
+    authorName: string;
+    text: string;
+    ts?: string;
+  }[] = [];
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'POST' && url.pathname === '/api/chat') {
+      const body = request.postDataJSON() as { text: string };
+      chatMessages = [
+        ...chatMessages,
+        {
+          id: 'opt-user',
+          author: 'user',
+          authorName: '我',
+          text: body.text,
+          ts: new Date().toISOString(),
+        },
+      ];
+      await route.fulfill({ json: { ok: true } });
+      return;
+    }
+    if (request.method() === 'POST') {
+      await route.fulfill({ json: { ok: true } });
+      return;
+    }
+    const payload: Record<string, unknown> = {
+      '/api/teams': { default: 'c1', teams: [{ id: 'c1', name: 'Hermes Lab' }] },
+      '/api/state': {
+        companyId: 'c1',
+        agents: [
+          {
+            id: 'pl',
+            name: 'PL',
+            title: '团队成员',
+            status: 'idle',
+            model: 'glm-5.3',
+            openCount: 0,
+            live: { running: 0, queued: 0, taskRunning: 0, backgroundRunning: 0, runs: [] },
+            current: null,
+          },
+        ],
+        liveRunning: 0,
+        liveQueued: 0,
+        liveTaskRunning: 0,
+        liveBackgroundRunning: 0,
+      },
+      '/api/chat': { state: 'available', messages: chatMessages },
+      '/api/tasks': { state: 'available', tasks: [], note: '' },
+      '/api/ops': {
+        tasks: { total: 0, stale: [], awaiting: [] },
+        blocked: { count: 0, onBoard: 0, over24h: 0, items: [] },
+        runs: { recent: { hours: 24, failed: 0, timedOut: 0 } },
+        alerts: [],
+        preflight: [],
+      },
+    };
+    await route.fulfill({ json: payload[url.pathname] || {} });
+  });
+
+  await page.goto('/');
+  const input = page.getByRole('textbox', { name: '消息', exact: true });
+  await input.fill(sample);
+  await page.getByRole('button', { name: '发送', exact: true }).click();
+
+  const bubble = page.locator('.chat-message.user').last();
+  await expect(bubble.locator('.markdown--user strong')).toHaveText('立刻');
+  await expect(bubble.locator('.user-text')).toHaveCount(0);
+  // Throughout the wait, never introduce user-text
+  await expect.poll(async () => page.locator('.chat-message.user .user-text').count()).toBe(0);
+});
