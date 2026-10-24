@@ -137,3 +137,16 @@ Agent Chat 需要实例 Experimental 设置中的 `enableAgentChat` 已开启，
 前端源码修改需重新运行 `make build`，开发时 `make dev` 提供热更新；Python或环境配置修改需重启服务。生产部署先 `make install check`，完整部署 `backend/`、启动入口及 `frontend/dist/`，再重启并进行只读页面验收。仅更新旧的两个产品文件已不适用；没有 Node.js 的运行节点可接收构建节点生成的 `frontend/dist/`。
 
 完整过程功能依赖同机Hermes会话库的当前schema；升级Hermes或Paperclip后应验证身份关联、工具配对和分页。不要为了“看起来有内容”放宽精确关联或把同任务的任意运行当成评论回执。
+
+## Agent 消息围栏 → 内容卡（前端约定）
+
+Agent 回复中的 Markdown **围栏代码块**由前端渲染为 TEXT/语言内容卡（Copy / Download），**不依赖**后端新消息类型或 Hermes 结构化载荷。
+
+| infostring | 顶栏标签 | 下载扩展名 |
+| --- | --- | --- |
+| 空 / `text` / `plaintext` / `txt` | `TEXT` | `.txt` |
+| 常见语言（`ts`/`bash`/`json`/…） | 短名或原名 | 对应扩展名 |
+| 其他 | 原 infostring（截断约 24） | `.txt` |
+
+空围栏（仅空白/换行）不渲染卡。行内 \`code\` 仍为 inline。JSON/Diff 审阅 UI 本迭代不做，仅共用卡壳扩展点。
+

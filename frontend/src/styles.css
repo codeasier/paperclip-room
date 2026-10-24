@@ -1738,6 +1738,78 @@ a:focus-visible {
 .markdown img {
   max-width: 100%;
 }
+.code-card {
+  margin: 11px 0;
+  border: 1px solid var(--line-2, #dfe3e9);
+  border-radius: 9px;
+  overflow: hidden;
+  background: #fff;
+  max-width: 100%;
+}
+.code-card-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 32px;
+  padding: 0 6px 0 12px;
+  background: var(--rail, #f8f9fb);
+  border-bottom: 1px solid var(--line, #eceef2);
+}
+.code-card-label {
+  font-size: 11px !important;
+  font-weight: 600;
+  color: var(--ink-2, #626c7b) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.code-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.code-card-btn.ant-btn {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  color: var(--ink-2, #626c7b);
+}
+.code-card-btn.ant-btn:hover,
+.code-card-btn.ant-btn:focus-visible {
+  color: var(--accent, #c65213) !important;
+}
+.code-card-body {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--pre-bg, #f9fafb);
+  overflow-x: auto;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+.code-card-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink, #242b36);
+  background: none;
+  padding: 0;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.markdown .code-card pre {
+  margin: 0;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 0;
+  background: var(--pre-bg, #f9fafb);
+}
 .ant-modal .ant-modal-title {
   font-size: 15px;
   font-weight: 650;

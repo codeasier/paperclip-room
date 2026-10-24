@@ -534,3 +534,113 @@ test('scroll-to-latest is a compact icon button when not stuck to bottom', async
   );
   expect(nearBottom).toBe(true);
 });
+
+test('code fence card: label, copy failure, download body, empty fence skipped', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 760, height: 900 });
+  const fenceBody = 'line-one\nline-two\nconst x = 1;\n';
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'POST') {
+      await route.fulfill({ json: { ok: true } });
+      return;
+    }
+    const md = [
+      '## 标题',
+      '',
+      '正文 `inline`。',
+      '',
+      '```ts',
+      fenceBody.trimEnd(),
+      '```',
+      '',
+      '```',
+      '   ',
+      '```',
+      '',
+      '```text',
+      'plain body',
+      '```',
+    ].join('\n');
+    const payload: Record<string, unknown> = {
+      '/api/teams': { default: 'c1', teams: [{ id: 'c1', name: 'Hermes Lab' }] },
+      '/api/state': {
+        companyId: 'c1',
+        agents: [
+          {
+            id: 'pl',
+            name: 'PL',
+            title: '团队成员',
+            status: 'idle',
+            model: 'glm-5.3',
+            openCount: 0,
+            live: { running: 0, queued: 0, taskRunning: 0, backgroundRunning: 0, runs: [] },
+            current: null,
+          },
+        ],
+        liveRunning: 0,
+        liveQueued: 0,
+        liveTaskRunning: 0,
+        liveBackgroundRunning: 0,
+      },
+      '/api/chat': {
+        state: 'available',
+        messages: [
+          {
+            id: 'agent-md',
+            author: 'agent',
+            authorName: 'PL',
+            text: md,
+            ts: new Date().toISOString(),
+          },
+        ],
+      },
+      '/api/tasks': { state: 'available', tasks: [], note: '' },
+      '/api/ops': {
+        tasks: { total: 0, stale: [], awaiting: [] },
+        blocked: { count: 0, onBoard: 0, over24h: 0, items: [] },
+        runs: { recent: { hours: 24, failed: 0, timedOut: 0 } },
+        alerts: [],
+        preflight: [],
+      },
+    };
+    await route.fulfill({ json: payload[url.pathname] || {} });
+  });
+
+  await page.goto('/');
+  const cards = page.locator('.code-card');
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0).locator('.code-card-label')).toHaveText('ts');
+  await expect(cards.nth(1).locator('.code-card-label')).toHaveText('TEXT');
+
+  // Copy failure must be perceptible
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: () => Promise.reject(new Error('denied')),
+      },
+    });
+  });
+  await cards.nth(0).getByRole('button', { name: '复制代码', exact: true }).click();
+  await expect(page.getByText('复制失败', { exact: false })).toBeVisible();
+
+  // Download content equals fence body (with trailing newline normalized by renderer)
+  const downloadPromise = page.waitForEvent('download');
+  await cards.nth(0).getByRole('button', { name: '下载代码', exact: true }).click();
+  const download = await downloadPromise;
+  const path = await download.path();
+  expect(path).toBeTruthy();
+  const fs = await import('node:fs');
+  const saved = fs.readFileSync(path!, 'utf8');
+  expect(saved).toBe(fenceBody.trimEnd());
+  expect(download.suggestedFilename()).toMatch(/\.ts$/);
+
+  // Narrow: buttons still clickable, no horizontal page overflow
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const copyBox = await cards.nth(0).getByRole('button', { name: '复制代码' }).boundingBox();
+  expect(copyBox!.width).toBeGreaterThanOrEqual(32);
+  expect(copyBox!.height).toBeGreaterThanOrEqual(32);
+});
