@@ -1,4 +1,4 @@
-import type { WriteResponse } from './types';
+import type { MemberConfigWriteResponse, WriteResponse } from './types';
 
 export function apiUrl(
   path: string,
@@ -45,4 +45,29 @@ export async function postJSON(url: string, body: object): Promise<WriteResponse
   if (!response.ok || !result.ok)
     throw new Error(result.error || `操作失败（HTTP ${response.status}）`);
   return result;
+}
+
+/** Member-config write that preserves HTTP status / applied for 409 and partial success. */
+export async function postMemberConfig(
+  url: string,
+  body: object,
+): Promise<{ status: number; body: MemberConfigWriteResponse }> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30000),
+    });
+  } catch {
+    throw new Error('未确认操作结果，请核对实际结果后再试；输入内容已保留。');
+  }
+  let result: MemberConfigWriteResponse;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('未确认操作结果，请核对实际结果后再试。');
+  }
+  return { status: response.status, body: result };
 }
