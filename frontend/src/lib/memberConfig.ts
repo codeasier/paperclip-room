@@ -75,7 +75,7 @@ export function validateField(
       return undefined;
     }
     case 'title': {
-      if ((draft.title || '').length > 128) return '标题过长';
+      if ((draft.title || '').length > 128) return 'title 过长';
       return undefined;
     }
     case 'instructions': {

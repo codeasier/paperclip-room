@@ -49,7 +49,7 @@ function memberConfig(options: MemberFixtureOptions = {}) {
       sessionReuse: {
         state: 'reused',
         detail: '最近 run 复用了 session',
-        source: 'runs.sessionIdAfter',
+        source: 'heartbeat-runs.sessionIdAfter',
         asOf: iso(-60000),
       },
       handoff: {
@@ -101,7 +101,7 @@ async function fixture(page: Page, options: MemberFixtureOptions = {}) {
       if ('instructions' in body && config.identity.instructions.mode !== 'writable') {
         await route.fulfill({
           status: 409,
-          json: { ok: false, error: '当前不可写 instructions', field: 'instructions' },
+          json: { ok: false, error: '当前 instructions 不可写', field: 'instructions' },
         });
         return;
       }

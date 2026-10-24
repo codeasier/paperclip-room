@@ -181,7 +181,7 @@ export function MemberPropsDrawer({ company, agent, open, onClose }: Props) {
     try {
       const { status, body: result } = await saveMutation.mutateAsync(body);
       if (status === 409 || result.field === 'instructions') {
-        void message.error(result.error || '当前不可写 instructions');
+        void message.error(result.error || '当前 instructions 不可写');
         setDiffOpen(false);
         await configQuery.refetch();
         return;

@@ -198,7 +198,7 @@ export interface MemberIdentity {
 }
 
 export interface MemorySessionReuse {
-  state: 'reused' | 'fresh' | 'unknown';
+  state: 'reused' | 'fresh' | 'unknown' | 'unavailable';
   detail?: string | null;
   source?: string | null;
   asOf?: string | null;
@@ -214,6 +214,7 @@ export interface MemoryHandoff {
   files?: MemoryHandoffFile[];
   source?: string | null;
   asOf?: string | null;
+  detail?: string | null;
 }
 
 export interface MemoryContextSize {
@@ -222,6 +223,7 @@ export interface MemoryContextSize {
   unit?: string | null;
   source?: string | null;
   asOf?: string | null;
+  detail?: string | null;
 }
 
 export interface MemberMemory {
