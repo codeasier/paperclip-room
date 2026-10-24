@@ -5,9 +5,13 @@ import remarkGfm from 'remark-gfm';
 import { CodeFenceCard } from './CodeFenceCard';
 import { isEmptyFence, parseInfoString } from '../lib/codeFence';
 
+export type MarkdownVariant = 'agent' | 'user';
+
 type MarkdownProps = {
   text: string;
-  /** Optional overrides; `pre`/`code` defaults implement #4 CodeFenceCard. */
+  /** Default `agent` keeps CodeFenceCard; `user` disables the card. */
+  variant?: MarkdownVariant;
+  /** Optional overrides; merge order: defaults(variant) ← components */
   components?: Partial<Components>;
 };
 
@@ -23,35 +27,46 @@ function extractFence(children: ReactNode): { info: string; code: string } | nul
   return { info, code };
 }
 
-const defaultComponents: Partial<Components> = {
-  a: ({ children, href }) => (
-    <a href={href} target="_blank" rel="noreferrer">
-      {children}
-    </a>
-  ),
-  table: ({ children }) => (
-    <div className="table-wrap">
-      <table>{children}</table>
-    </div>
-  ),
-  pre: ({ children }) => {
-    const fence = extractFence(children);
-    if (!fence) return <pre>{children}</pre>;
-    if (isEmptyFence(fence.code)) return null;
-    return <CodeFenceCard infoString={fence.info} code={fence.code} />;
-  },
-  code: ({ className, children, ...rest }) => (
-    <code className={className} {...rest}>
-      {children}
-    </code>
-  ),
-};
+function defaultComponents(variant: MarkdownVariant): Partial<Components> {
+  return {
+    a: ({ children, href }) => (
+      <a href={href} target="_blank" rel="noreferrer">
+        {children}
+      </a>
+    ),
+    table: ({ children }) => (
+      <div className="table-wrap">
+        <table>{children}</table>
+      </div>
+    ),
+    pre: ({ children }) => {
+      const fence = extractFence(children);
+      if (!fence) return <pre>{children}</pre>;
+      if (isEmptyFence(fence.code)) return null;
+      if (variant === 'user') {
+        const className = fence.info ? `language-${fence.info}` : undefined;
+        return (
+          <pre>
+            <code className={className}>{fence.code}</code>
+          </pre>
+        );
+      }
+      return <CodeFenceCard infoString={fence.info} code={fence.code} />;
+    },
+    code: ({ className, children, ...rest }) => (
+      <code className={className} {...rest}>
+        {children}
+      </code>
+    ),
+  };
+}
 
-export function Markdown({ text, components }: MarkdownProps) {
-  const merged: Partial<Components> = { ...defaultComponents, ...components };
+export function Markdown({ text, variant = 'agent', components }: MarkdownProps) {
+  const merged: Partial<Components> = { ...defaultComponents(variant), ...components };
+  const className = variant === 'user' ? 'markdown markdown--user' : 'markdown';
 
   return (
-    <div className="markdown">
+    <div className={className}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={merged}>
         {text}
       </ReactMarkdown>
