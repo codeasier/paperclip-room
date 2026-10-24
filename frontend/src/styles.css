@@ -651,7 +651,7 @@ a:focus-visible {
 }
 .message-body {
   min-width: 0;
-  max-width: min(78%, 640px);
+  max-width: min(85%, 720px); /* #3: widened for GFM tables; was min(78%, 640px) */
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -676,7 +676,7 @@ a:focus-visible {
   padding: 9px 12px;
   background: #fff;
   font-size: 13.5px;
-  line-height: 1.75;
+  line-height: 1.6;
   overflow-wrap: anywhere;
   min-width: 0;
   max-width: 100%;
@@ -1619,7 +1619,7 @@ a:focus-visible {
 }
 .markdown {
   font-size: inherit;
-  line-height: 1.8;
+  line-height: 1.6;
   overflow-wrap: anywhere;
   min-width: 0;
 }
@@ -1631,35 +1631,48 @@ a:focus-visible {
 }
 .markdown p {
   white-space: pre-line;
-  margin: 0 0 12px;
+  margin: 0 0 9px;
 }
-.markdown h3,
+.markdown h3 {
+  font-size: 15.5px;
+  font-weight: 650;
+  color: var(--ink, #242b36);
+  margin: 18px 0 9px;
+  line-height: 1.35;
+}
 .markdown h4,
 .markdown h5 {
+  font-size: 14px;
   font-weight: 600;
-  color: #111827;
-  margin: 20px 0 12px;
+  color: var(--ink, #242b36);
+  margin: 15px 0 7px;
+  line-height: 1.4;
 }
 .markdown ul,
 .markdown ol {
-  padding-left: 20px;
+  padding-left: 19px;
+  margin: 0 0 9px;
 }
 .markdown li {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+}
+.markdown li > p {
+  margin-bottom: 4px;
 }
 .markdown code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.88em;
-  background: #edf0f5;
-  color: #825229;
-  padding: 2px 5px;
+  background: var(--code-bg, #edf0f5);
+  color: var(--code-fg, #825229);
+  padding: 1px 4px;
   border-radius: 4px;
+  overflow-wrap: anywhere;
 }
 .markdown pre {
-  margin: 14px 0;
-  padding: 14px 16px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  margin: 12px 0;
+  padding: 12px 14px;
+  background: var(--pre-bg, #f9fafb);
+  border: 1px solid var(--line-2, #dfe3e9);
   border-radius: 8px;
   overflow-x: auto;
   max-width: 100%;
@@ -1667,36 +1680,46 @@ a:focus-visible {
 .markdown pre code {
   background: none;
   padding: 0;
-  color: #1f2937;
+  color: var(--ink, #242b36);
   font-size: 12px;
   white-space: pre-wrap;
+  overflow-wrap: normal;
 }
 .markdown blockquote {
-  border-left: 4px solid #3b82f6;
-  background: #eff6ff80;
-  margin: 20px 0;
-  padding: 12px 16px;
-  color: #4b5563;
+  border-left: 3px solid var(--accent, #c65213);
+  background: var(--rail, #f8f9fb);
+  margin: 12px 0;
+  padding: 8px 12px;
+  color: var(--ink-2, #626c7b);
 }
 .markdown a {
   color: #2563eb;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.markdown table {
+.markdown .table-wrap {
   display: block;
-  overflow: auto;
-  border-collapse: collapse;
+  overflow-x: auto;
   max-width: 100%;
+  margin: 0 0 9px;
+  -webkit-overflow-scrolling: touch;
+}
+.markdown table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
   font-size: 12px;
 }
 .markdown th,
 .markdown td {
-  border: 1px solid #e5e7eb;
-  padding: 8px 12px;
+  border: 1px solid var(--line-2, #dfe3e9);
+  padding: 6px 10px;
 }
 .markdown th {
-  background: #f9fafb;
+  background: var(--rail, #f8f9fb);
+  font-weight: 600;
+  color: var(--ink-2, #626c7b);
 }
 .markdown img {
   max-width: 100%;
