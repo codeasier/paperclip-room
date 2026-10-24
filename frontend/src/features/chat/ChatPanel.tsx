@@ -1,6 +1,6 @@
 import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Alert, App, Button, Input, Spin, Typography } from 'antd';
+import { Alert, App, Button, Input, Typography } from 'antd';
 import { ArrowUpOutlined } from '@ant-design/icons';
 import { apiUrl, postJSON } from '../../api/client';
 import type { Agent, ChatResponse } from '../../api/types';
@@ -85,8 +85,10 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
         >
           <div className="chat-inner">
             {query.isPending && (
-              <div className="loading">
-                <Spin />
+              <div className="chat-welcome">
+                <span className="welcome-mark">···</span>
+                <Typography.Title level={3}>正在加载对话</Typography.Title>
+                <Typography.Paragraph type="secondary">获取与成员的直接消息…</Typography.Paragraph>
               </div>
             )}
             {query.isError && (

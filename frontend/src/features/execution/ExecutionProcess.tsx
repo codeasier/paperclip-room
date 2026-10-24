@@ -1,5 +1,5 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { Alert, Button, Collapse, Empty, Spin, Typography } from 'antd';
+import { Alert, Button, Collapse, Empty, Typography } from 'antd';
 import { apiUrl, getJSON } from '../../api/client';
 import type { ExecutionRun, TranscriptEntry } from '../../api/types';
 import { Markdown } from '../../components/Markdown';
@@ -30,12 +30,7 @@ export function ExecutionProcess({
         ? 8000
         : false,
   });
-  if (query.isPending)
-    return (
-      <div className="loading">
-        <Spin />
-      </div>
-    );
+  if (query.isPending) return <div className="task-note">正在读取工具调用与助手消息…</div>;
   if (!query.data)
     return (
       <Alert

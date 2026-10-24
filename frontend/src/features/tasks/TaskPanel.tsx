@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useRef, useState } from 'react';
-import { Alert, Button, Empty, Input, Segmented, Select, Spin, Typography } from 'antd';
+import { Alert, Button, Empty, Input, Segmented, Select, Typography } from 'antd';
 import { RightOutlined } from '@ant-design/icons';
 import type {
   Agent,
@@ -181,11 +181,7 @@ export function TaskPanel({
               element.scrollHeight - element.scrollTop - element.clientHeight < 90;
         }}
       >
-        {pending && (
-          <div className="loading">
-            <Spin />
-          </div>
-        )}
+        {pending && !rows.length && <div className="task-skeleton">正在读取任务进展…</div>}
         {error && (
           <Alert
             type="error"
