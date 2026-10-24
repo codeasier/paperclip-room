@@ -31,6 +31,9 @@ export function AgentSidebar({
           const title = agent.current
             ? `${agent.current.identifier} · ${agent.current.title}`
             : '暂无在办任务';
+          const hasRecentError =
+            Boolean(agent.lastRunError) && agent.lastRunAgeMin != null && agent.lastRunAgeMin < 60;
+          const isBlocked = agent.current?.status === 'blocked';
           return (
             <button
               key={agent.id}
@@ -48,7 +51,7 @@ export function AgentSidebar({
                 </span>
                 <span className={`agent-task ${state}`}>
                   <span>{title}</span>
-                  {state !== 'idle' && (
+                  {state !== 'idle' ? (
                     <small>
                       {agent.live.taskRunning
                         ? `${agent.live.taskRunning} 任务运行`
@@ -56,7 +59,11 @@ export function AgentSidebar({
                           ? `${agent.live.backgroundRunning} 后台运行`
                           : `${agent.live.queued} 排队`}
                     </small>
-                  )}
+                  ) : hasRecentError ? (
+                    <small className="error-pill">异常</small>
+                  ) : isBlocked ? (
+                    <small className="blocked-pill">受阻</small>
+                  ) : null}
                 </span>
               </span>
             </button>

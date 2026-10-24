@@ -1,10 +1,11 @@
 import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, App, Button, Empty, Result, Select, Space, Spin, Tabs, Typography } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { apiUrl, getJSON, postJSON } from '../api/client';
 import type {
   Agent,
+  OpsIssue,
   OpsResponse,
   StateResponse,
   TasksResponse,
@@ -18,6 +19,14 @@ import { MemberAvatar, roleLabel } from '../components/MemberAvatar';
 import { StatusTag } from '../components/StatusTag';
 import { ChatPanel } from '../features/chat/ChatPanel';
 import type { Detail } from '../features/tasks/DetailDrawer';
+
+interface WorkspaceIntent {
+  seq: number;
+  kind: 'task' | 'props';
+  taskId?: string;
+  identifier?: string;
+  fallbackTitle?: string;
+}
 
 const TaskPanel = lazy(() =>
   import('../features/tasks/TaskPanel').then((module) => ({ default: module.TaskPanel })),
@@ -124,6 +133,7 @@ function TeamWorkspace({
   const [selection, setSelection] = useState('');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [opsOpen, setOpsOpen] = useState(false);
+  const [intent, setIntent] = useState<WorkspaceIntent | null>(null);
   const client = useQueryClient();
   const state = useRoomQuery<StateResponse>('/api/state', team.id, undefined, 5000);
   const ops = useRoomQuery<OpsResponse>('/api/ops', team.id, undefined, 30000);
@@ -132,6 +142,40 @@ function TeamWorkspace({
     agents.find((agent) => agent.id === selection) ||
     agents.find((agent) => agent.name === 'PL') ||
     agents[0];
+  function handleOpsIssue(item: OpsIssue) {
+    const matched =
+      agents.find((candidate) => candidate.current?.identifier === item.identifier) ||
+      (item.owner
+        ? agents.find(
+            (candidate) =>
+              candidate.name.toLowerCase() === item.owner!.toLowerCase() ||
+              candidate.id === item.owner,
+          )
+        : undefined) ||
+      agent;
+    if (matched) setSelection(matched.id);
+    setOpsOpen(false);
+    setIntent((prev) => ({
+      seq: (prev?.seq || 0) + 1,
+      kind: 'task',
+      taskId: item.id || item.identifier,
+      identifier: item.identifier,
+      fallbackTitle: item.title,
+    }));
+  }
+  function handleOpsPreflight(agentName: string) {
+    const matched =
+      agents.find(
+        (candidate) =>
+          candidate.name.toLowerCase() === agentName.toLowerCase() || candidate.id === agentName,
+      ) || agent;
+    if (matched) setSelection(matched.id);
+    setOpsOpen(false);
+    setIntent((prev) => ({
+      seq: (prev?.seq || 0) + 1,
+      kind: 'props',
+    }));
+  }
   return (
     <div className="room-app">
       <header className="app-header">
@@ -197,6 +241,7 @@ function TeamWorkspace({
               agent={agent}
               draft={drafts[agent.id] || ''}
               onDraft={(value) => setDrafts((previous) => ({ ...previous, [agent.id]: value }))}
+              intent={intent}
             />
           ) : (
             <Empty
@@ -208,7 +253,13 @@ function TeamWorkspace({
       </div>
       {opsOpen && (
         <Suspense fallback={null}>
-          <OpsModal company={team.id} open onClose={() => setOpsOpen(false)} />
+          <OpsModal
+            company={team.id}
+            open
+            onClose={() => setOpsOpen(false)}
+            onSelectIssue={handleOpsIssue}
+            onSelectPreflight={handleOpsPreflight}
+          />
         </Suspense>
       )}
     </div>
@@ -220,17 +271,36 @@ function AgentWorkspace({
   agent,
   draft,
   onDraft,
+  intent,
 }: {
   company: string;
   agent: Agent;
   draft: string;
   onDraft: (value: string) => void;
+  intent?: WorkspaceIntent | null;
 }) {
   const [view, setView] = useState('chat');
   const [tasksVisited, setTasksVisited] = useState(false);
   const [creating, setCreating] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [propsOpen, setPropsOpen] = useState(false);
+  useEffect(() => {
+    if (!intent) return;
+    if (intent.kind === 'props') {
+      setDetail(null);
+      setPropsOpen(true);
+    } else if (intent.kind === 'task' && intent.taskId) {
+      setPropsOpen(false);
+      setTasksVisited(true);
+      setView('tasks');
+      setDetail({
+        kind: 'task',
+        taskId: intent.taskId,
+        identifier: intent.identifier,
+        fallbackTitle: intent.fallbackTitle,
+      });
+    }
+  }, [intent]);
   const tasks = useRoomQuery<TasksResponse>(
     '/api/tasks',
     company,
@@ -283,8 +353,8 @@ function AgentWorkspace({
         <div className="member-copy">
           <Typography.Title level={4}>{agent.name}</Typography.Title>
           <Typography.Text type="secondary">
-            {roleLabel(agent.name, agent.title)} · 名下 {agent.openCount || 0} 个未结任务 ·{' '}
-            {runningText === '待命中' ? '待命' : runningText}
+            {roleLabel(agent.name, agent.title)} · 名下 {agent.openCount || 0} 个未结任务
+            {runningText === '待命中' ? '' : ` · ${runningText}`}
           </Typography.Text>
         </div>
         <Button
@@ -321,15 +391,40 @@ function AgentWorkspace({
           type="warning"
           title={`最近运行异常（${agent.lastRunAgeMin} 分钟前）`}
           description={agent.lastRunError}
+          action={
+            <Button
+              size="small"
+              onClick={() => {
+                setDetail(null);
+                setPropsOpen(true);
+              }}
+            >
+              检查配置
+            </Button>
+          }
         />
       )}
       {agent.current && (
-        <div className="task-context" title="这是当前名下未结任务；任务状态不代表成员正在执行。">
+        <button
+          type="button"
+          className="task-context task-context-button"
+          title="点击查看当前名下任务详情；任务状态不代表成员正在执行。"
+          onClick={() => {
+            setPropsOpen(false);
+            setDetail({
+              kind: 'task',
+              taskId: agent.current!.identifier,
+              identifier: agent.current!.identifier,
+              fallbackTitle: agent.current!.title,
+            });
+          }}
+        >
           <span className="task-caption">当前名下任务</span>
           <strong>{agent.current.identifier}</strong>
           <span className="task-context-title">{agent.current.title}</span>
           <StatusTag status={agent.current.status} prefix="任务：" />
-        </div>
+          <RightOutlined className="record-chevron" />
+        </button>
       )}
       <div className={`room-body ${detail || propsOpen ? 'detail-open' : ''}`}>
         <div className="conversation-body">

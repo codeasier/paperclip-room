@@ -130,9 +130,17 @@ a:focus-visible {
 .sync-label {
   border: 0;
   background: transparent;
-  padding: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
   font-size: 11px;
   color: var(--ink-3);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.sync-label:hover {
+  background: var(--rail-hover);
+  color: var(--ink-2);
 }
 .team-live,
 .ops-chip.ant-btn {
@@ -316,6 +324,11 @@ a:focus-visible {
   font-weight: 700;
   flex: none;
 }
+.agent-task small.error-pill,
+.agent-task small.blocked-pill {
+  background: #fff0ee;
+  color: #b42318;
+}
 .sidebar-footer {
   font-size: 11px;
   color: var(--ink-3);
@@ -388,10 +401,16 @@ a:focus-visible {
   align-items: center;
   gap: 10px;
   flex: none;
+  width: 100%;
+  border: 0;
+  text-align: left;
   padding: 10px 32px;
   font-size: 12px;
   background: #fcfcfd;
   border-bottom: 1px solid var(--line);
+}
+.task-context-button:hover {
+  background: var(--rail-hover);
 }
 .task-caption {
   color: var(--ink-3);
@@ -1203,7 +1222,7 @@ a:focus-visible {
   margin: 0 0 8px;
 }
 .unmeasured-section {
-  order: 2;
+  order: 3;
   margin: 12px 0;
   border: 1px solid var(--line-2);
   border-radius: 8px;
@@ -1254,7 +1273,7 @@ a:focus-visible {
   line-height: 1.5;
 }
 .trace-scroll {
-  order: 3;
+  order: 2;
   overflow: auto;
   max-width: 100%;
   border: 1px solid var(--line-2);
@@ -1574,6 +1593,22 @@ a:focus-visible {
   color: var(--ink);
   overflow-wrap: anywhere;
 }
+.detail-task-meta-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.detail-priority-badge,
+.detail-elapsed-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--rail);
+  color: var(--ink-2);
+}
 .detail-task-status {
   display: inline-flex;
   align-items: center;
@@ -1648,6 +1683,17 @@ a:focus-visible {
   font-size: 10.5px;
   color: var(--ink-3);
 }
+.comment-expand-btn {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  padding: 0 4px;
+  font-size: 10.5px;
+  color: var(--accent);
+}
+.comment-expand-btn:hover {
+  text-decoration: underline;
+}
 .task-comment-text {
   font-size: 11.5px;
   line-height: 1.55;
@@ -1656,6 +1702,10 @@ a:focus-visible {
   overflow-wrap: anywhere;
   max-height: 5.2em;
   overflow: hidden;
+}
+.task-comment-text.expanded {
+  max-height: none;
+  overflow: visible;
 }
 .task-error,
 .execution-warning {
@@ -1672,12 +1722,45 @@ a:focus-visible {
   background: #fff8ed;
   margin-bottom: 8px;
 }
+.execution-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.execution-heading-row h5.ant-typography {
+  margin: 0;
+}
+.execution-tools-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.execution-action-link {
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.execution-action-link:hover {
+  color: var(--accent);
+}
 .tool-label {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
   font-size: 11px;
+}
+.tool-chevron {
+  flex: none;
+  font-size: 10px;
+  color: var(--ink-3);
 }
 .tool-label strong {
   flex: none;
@@ -2005,6 +2088,11 @@ a:focus-visible {
 .ant-modal-wrap .ant-modal {
   max-width: calc(100vw - 32px);
 }
+.ant-modal.ant-zoom-appear-prepare,
+.ant-modal-mask.ant-fade-appear-prepare {
+  opacity: 1 !important;
+  transform: none !important;
+}
 .ant-modal .ant-modal-container {
   max-height: calc(100dvh - 32px);
   overflow: auto;
@@ -2138,6 +2226,31 @@ a:focus-visible {
   background: #fff;
   margin-bottom: 0;
   font-size: 12px;
+}
+.ops-row-button {
+  width: 100%;
+  text-align: left;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+.ops-row-button:hover {
+  background: var(--accent-weak);
+  border-color: #f3c9a9;
+}
+.ops-row-owner {
+  margin-left: auto;
+  flex: none;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  background: var(--rail);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.ops-row-chevron {
+  flex: none;
+  font-size: 10px;
+  color: var(--ink-3);
 }
 .ops-row p {
   color: var(--ink-3);

@@ -29,15 +29,15 @@ export function utf8ByteLength(text: string): number {
 }
 
 export function snapshotFromConfig(config: MemberConfig): DraftFields {
-  const runtime = config.runtime;
-  const identity = config.identity;
+  const runtime = config?.runtime;
+  const identity = config?.identity;
   return {
-    model: runtime.model ?? '',
-    timeoutSec: runtime.timeoutSec ?? null,
-    maxConcurrentRuns: runtime.maxConcurrentRuns ?? null,
-    name: identity.name ?? '',
-    title: identity.title ?? '',
-    instructions: identity.instructions.content ?? '',
+    model: runtime?.model ?? '',
+    timeoutSec: runtime?.timeoutSec ?? null,
+    maxConcurrentRuns: runtime?.maxConcurrentRuns ?? null,
+    name: identity?.name ?? '',
+    title: identity?.title ?? '',
+    instructions: identity?.instructions?.content ?? '',
   };
 }
 

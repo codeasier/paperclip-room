@@ -897,3 +897,54 @@ test('user markdown optimistic: sent bubble is markdown--user without user-text 
   // Throughout the wait, never introduce user-text
   await expect.poll(async () => page.locator('.chat-message.user .user-text').count()).toBe(0);
 });
+
+test('interactive task-context banner and ops modal navigation to task detail and member props', async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route('**/api/ops?**', (route) =>
+    route.fulfill({
+      json: {
+        tasks: {
+          total: 2,
+          stale: [],
+          awaiting: [
+            {
+              id: 'one',
+              identifier: 'HER-1',
+              title: '并行任务 <script>unsafe</script>',
+              owner: 'PL',
+              idleMinutes: 30,
+            },
+          ],
+        },
+        blocked: { count: 1, onBoard: 1, over24h: 0, items: [] },
+        runs: { recent: { hours: 24, failed: 1, timedOut: 0 } },
+        alerts: [{ code: 'awaiting', level: 'warn', message: '1 个任务在等你回答问题' }],
+        preflight: [{ agent: 'QA', detail: 'Hermes exited with code 1' }],
+      },
+    }),
+  );
+  await page.getByRole('button', { name: '刷新', exact: true }).click();
+
+  // Clicking the current task context banner opens its task detail drawer directly
+  await page.locator('.task-context-button').click();
+  await expect(page.locator('.detail-slot')).toBeVisible();
+  await expect(page.locator('.detail-title')).toContainText('HER-1');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.detail-slot')).toHaveCount(0);
+
+  // Clicking an issue inside OpsModal closes the modal, switches to Tasks tab, and opens DetailDrawer
+  await page.getByRole('button', { name: /巡检/ }).click();
+  await expect(page.getByRole('dialog', { name: '团队巡检' })).toBeVisible();
+  await page.locator('.ops-row-button', { hasText: 'HER-1' }).click();
+  await expect(page.getByRole('dialog', { name: '团队巡检' })).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: '任务' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.detail-title')).toContainText('HER-1');
+
+  // Clicking a preflight item inside OpsModal selects that member and opens MemberPropsDrawer
+  await page.getByRole('button', { name: /巡检/ }).click();
+  await page.locator('.ops-row-button', { hasText: 'QA' }).click();
+  await expect(page.getByRole('heading', { name: 'QA', exact: true })).toBeVisible();
+  await expect(page.getByText('成员属性 · QA')).toBeVisible();
+});

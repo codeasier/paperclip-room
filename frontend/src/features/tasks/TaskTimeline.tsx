@@ -162,9 +162,11 @@ export function TaskTimeline({ tasks, agentId, agentName, onTask, onRun }: Props
                           }}
                           onClick={() => onRun(interval.run.id, task)}
                         >
-                          {interval.measured
+                          {interval.measured && width >= 14
                             ? `${interval.run.status === 'succeeded' ? '运行成功' : statuses[interval.run.status] || interval.run.status} · ${duration(interval.end - interval.start)}`
-                            : ''}
+                            : interval.measured && width >= 6
+                              ? duration(interval.end - interval.start)
+                              : ''}
                         </button>
                       </Tooltip>
                     );
