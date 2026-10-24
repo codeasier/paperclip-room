@@ -592,17 +592,31 @@ a:focus-visible {
 }
 .latest-messages.ant-btn {
   position: absolute;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 20px;
+  bottom: 14px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--line-2);
-  background: #fff;
-  border-radius: 24px;
-  box-shadow: 0 3px 16px #242b3612;
-  padding: 9px 16px;
-  height: auto;
-  font-size: 12px;
+  background: var(--rail, #f8f9fb);
+  border-radius: 99px;
+  box-shadow: 0 1px 4px rgba(36, 43, 54, 0.08);
   color: var(--ink-2);
+  font-size: 14px;
+}
+.latest-messages.ant-btn:hover,
+.latest-messages.ant-btn:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.latest-messages.ant-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 2px;
 }
 .chat-stream {
   overflow: auto;
