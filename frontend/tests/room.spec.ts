@@ -461,3 +461,77 @@ for (const width of [1440, 1024, 390, 320]) {
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 }
+
+
+test('scroll-to-latest is a compact icon button when not stuck to bottom', async ({ page }) => {
+  await page.setViewportSize({ width: 760, height: 640 });
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'POST') {
+      await route.fulfill({ json: { ok: true } });
+      return;
+    }
+    const long = Array.from({ length: 40 }, (_, i) => ({
+      id: `m-${i}`,
+      author: i % 2 ? 'user' : 'agent',
+      authorName: i % 2 ? '你' : 'PL',
+      text: `消息行 ${i} — ${'内容 '.repeat(8)}`,
+      ts: new Date(Date.now() - (40 - i) * 60000).toISOString(),
+    }));
+    const payload: Record<string, unknown> = {
+      '/api/teams': { default: 'c1', teams: [{ id: 'c1', name: 'Hermes Lab' }] },
+      '/api/state': {
+        companyId: 'c1',
+        agents: [
+          {
+            id: 'pl',
+            name: 'PL',
+            title: '团队成员',
+            status: 'idle',
+            model: 'glm-5.3',
+            openCount: 0,
+            live: { running: 0, queued: 0, taskRunning: 0, backgroundRunning: 0, runs: [] },
+            current: null,
+          },
+        ],
+        liveRunning: 0,
+        liveQueued: 0,
+        liveTaskRunning: 0,
+        liveBackgroundRunning: 0,
+      },
+      '/api/chat': { state: 'available', messages: long },
+      '/api/tasks': { state: 'available', tasks: [], note: '' },
+      '/api/ops': {
+        tasks: { total: 0, stale: [], awaiting: [] },
+        blocked: { count: 0, onBoard: 0, over24h: 0, items: [] },
+        runs: { recent: { hours: 24, failed: 0, timedOut: 0 } },
+        alerts: [],
+        preflight: [],
+      },
+    };
+    await route.fulfill({ json: payload[url.pathname] || {} });
+  });
+  await page.goto('/');
+  await expect(page.getByText('消息行 0', { exact: false }).first()).toBeVisible();
+  const stream = page.locator('.chat-stream');
+  await stream.evaluate((el) => {
+    el.scrollTop = 0;
+    el.dispatchEvent(new Event('scroll'));
+  });
+  const btn = page.getByRole('button', { name: '回到最新消息', exact: true });
+  await expect(btn).toBeVisible();
+  await expect(btn).not.toContainText('回到最新消息');
+  const box = await btn.boundingBox();
+  expect(box).toBeTruthy();
+  expect(box!.width).toBeGreaterThanOrEqual(32);
+  expect(box!.width).toBeLessThanOrEqual(40);
+  expect(box!.height).toBeGreaterThanOrEqual(32);
+  expect(box!.height).toBeLessThanOrEqual(40);
+  await btn.click();
+  await expect(btn).toHaveCount(0);
+  const nearBottom = await stream.evaluate(
+    (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 80,
+  );
+  expect(nearBottom).toBe(true);
+});

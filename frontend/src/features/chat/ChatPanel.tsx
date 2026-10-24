@@ -1,7 +1,7 @@
 import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Alert, App, Button, Input, Typography } from 'antd';
-import { ArrowUpOutlined } from '@ant-design/icons';
+import { ArrowDownOutlined, ArrowUpOutlined } from '@ant-design/icons';
 import { apiUrl, postJSON } from '../../api/client';
 import type { Agent, ChatResponse } from '../../api/types';
 import { useRoomQuery } from '../../hooks/useRoomQuery';
@@ -152,14 +152,17 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
         {showLatest && (
           <Button
             className="latest-messages"
+            type="default"
+            shape="circle"
+            aria-label="回到最新消息"
+            title="回到最新消息"
+            icon={<ArrowDownOutlined />}
             onClick={() => {
               if (stream.current) stream.current.scrollTop = stream.current.scrollHeight;
               stickToBottom.current = true;
               setShowLatest(false);
             }}
-          >
-            ↓ 回到最新消息
-          </Button>
+          />
         )}
       </div>
       <div className="composer">
