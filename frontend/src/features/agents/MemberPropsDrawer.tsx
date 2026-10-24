@@ -115,9 +115,9 @@ export function MemberPropsDrawer({ company, agent, open, onClose }: Props) {
     }
   }, [configQuery.data]);
 
-  const instructionsWritable = configQuery.data?.identity.instructions.mode === 'writable';
-  const instructionsMode = configQuery.data?.identity.instructions.mode;
-  const runtimeWarning = configQuery.data?.runtime.warning;
+  const instructionsWritable = configQuery.data?.identity?.instructions?.mode === 'writable';
+  const instructionsMode = configQuery.data?.identity?.instructions?.mode;
+  const runtimeWarning = configQuery.data?.runtime?.warning;
 
   const dirty = useMemo(() => {
     if (!draft || !snapshot) return [] as MemberConfigWritableKey[];
@@ -322,232 +322,235 @@ export function MemberPropsDrawer({ company, agent, open, onClose }: Props) {
           />
         )}
 
-        {configQuery.data && draft && (
-          <Tabs
-            className="member-props-tabs"
-            activeKey={tab}
-            onChange={(key) => setTab(key as TabKey)}
-            items={[
-              {
-                key: 'runtime',
-                label: '运行配置',
-                children: (
-                  <Form layout="vertical" className="member-props-form" requiredMark={false}>
-                    {runtimeWarning && (
-                      <Alert
-                        className="member-props-alert"
-                        type="warning"
-                        showIcon
-                        title={runtimeWarning}
-                      />
-                    )}
-                    <Form.Item
-                      label="模型"
-                      validateStatus={errors.model ? 'error' : undefined}
-                      help={errors.model}
-                    >
-                      <Select
-                        aria-label="属性模型"
-                        showSearch
-                        value={draft.model || undefined}
-                        options={modelOptions}
-                        onChange={(value) => patchDraft({ model: value })}
-                        placeholder="请选择或填写模型"
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      label="超时 timeoutSec（秒）"
-                      validateStatus={errors.timeoutSec ? 'error' : undefined}
-                      help={
-                        errors.timeoutSec || `须 ≥ ${TIMEOUT_MIN_SEC}，低于会触发巡检 timeout_low`
-                      }
-                    >
-                      <InputNumber
-                        aria-label="超时秒数"
-                        className="member-props-number"
-                        min={0}
-                        step={60}
-                        value={draft.timeoutSec ?? undefined}
-                        onChange={(value) =>
-                          patchDraft({ timeoutSec: typeof value === 'number' ? value : null })
+        {configQuery.data?.runtime &&
+          configQuery.data?.identity &&
+          configQuery.data?.memory &&
+          draft && (
+            <Tabs
+              className="member-props-tabs"
+              activeKey={tab}
+              onChange={(key) => setTab(key as TabKey)}
+              items={[
+                {
+                  key: 'runtime',
+                  label: '运行配置',
+                  children: (
+                    <Form layout="vertical" className="member-props-form" requiredMark={false}>
+                      {runtimeWarning && (
+                        <Alert
+                          className="member-props-alert"
+                          type="warning"
+                          showIcon
+                          title={runtimeWarning}
+                        />
+                      )}
+                      <Form.Item
+                        label="模型"
+                        validateStatus={errors.model ? 'error' : undefined}
+                        help={errors.model}
+                      >
+                        <Select
+                          aria-label="属性模型"
+                          showSearch
+                          value={draft.model || undefined}
+                          options={modelOptions}
+                          onChange={(value) => patchDraft({ model: value })}
+                          placeholder="请选择或填写模型"
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        label="超时 timeoutSec（秒）"
+                        validateStatus={errors.timeoutSec ? 'error' : undefined}
+                        help={
+                          errors.timeoutSec || `须 ≥ ${TIMEOUT_MIN_SEC}，低于会触发巡检 timeout_low`
                         }
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      label="并发 maxConcurrentRuns"
-                      validateStatus={errors.maxConcurrentRuns ? 'error' : undefined}
-                      help={errors.maxConcurrentRuns || CONCURRENT_ZERO_HELP}
-                    >
-                      <InputNumber
-                        aria-label="最大并发"
-                        className="member-props-number"
-                        min={CONCURRENT_MIN}
-                        step={1}
-                        value={draft.maxConcurrentRuns ?? undefined}
-                        onChange={(value) =>
-                          patchDraft({
-                            maxConcurrentRuns: typeof value === 'number' ? value : null,
-                          })
-                        }
-                      />
-                    </Form.Item>
-                    {draft.maxConcurrentRuns === 0 && (
-                      <Alert
-                        className="member-props-alert"
-                        type="info"
-                        showIcon
-                        title="不领取新 run"
-                        description={CONCURRENT_ZERO_DETAIL}
-                      />
-                    )}
-                  </Form>
-                ),
-              },
-              {
-                key: 'identity',
-                label: '身份',
-                children: (
-                  <Form layout="vertical" className="member-props-form" requiredMark={false}>
-                    <Form.Item
-                      label="名称 name"
-                      validateStatus={errors.name ? 'error' : undefined}
-                      help={errors.name}
-                    >
-                      <Input
-                        aria-label="成员名称"
-                        value={draft.name}
-                        onChange={(event) => patchDraft({ name: event.target.value })}
-                      />
-                    </Form.Item>
-                    <Form.Item label="标题 title">
-                      <Input
-                        aria-label="成员标题"
-                        value={draft.title}
-                        onChange={(event) => patchDraft({ title: event.target.value })}
-                      />
-                    </Form.Item>
-                    <div className="member-props-preview">
-                      <span className="member-props-section-label">职责预览</span>
-                      <Typography.Text>
-                        {roleLabel(draft.name || agent.name, draft.title)}
-                      </Typography.Text>
-                    </div>
-                    <div className="member-props-instructions">
-                      <div className="member-props-section-label">
-                        instructions
-                        {instructionsMode && instructionsMode !== 'writable' && (
-                          <Tag className="member-props-readonly-tag">只读</Tag>
+                      >
+                        <InputNumber
+                          aria-label="超时秒数"
+                          className="member-props-number"
+                          min={0}
+                          step={60}
+                          value={draft.timeoutSec ?? undefined}
+                          onChange={(value) =>
+                            patchDraft({ timeoutSec: typeof value === 'number' ? value : null })
+                          }
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        label="并发 maxConcurrentRuns"
+                        validateStatus={errors.maxConcurrentRuns ? 'error' : undefined}
+                        help={errors.maxConcurrentRuns || CONCURRENT_ZERO_HELP}
+                      >
+                        <InputNumber
+                          aria-label="最大并发"
+                          className="member-props-number"
+                          min={CONCURRENT_MIN}
+                          step={1}
+                          value={draft.maxConcurrentRuns ?? undefined}
+                          onChange={(value) =>
+                            patchDraft({
+                              maxConcurrentRuns: typeof value === 'number' ? value : null,
+                            })
+                          }
+                        />
+                      </Form.Item>
+                      {draft.maxConcurrentRuns === 0 && (
+                        <Alert
+                          className="member-props-alert"
+                          type="info"
+                          showIcon
+                          title="不领取新 run"
+                          description={CONCURRENT_ZERO_DETAIL}
+                        />
+                      )}
+                    </Form>
+                  ),
+                },
+                {
+                  key: 'identity',
+                  label: '身份',
+                  children: (
+                    <Form layout="vertical" className="member-props-form" requiredMark={false}>
+                      <Form.Item
+                        label="名称 name"
+                        validateStatus={errors.name ? 'error' : undefined}
+                        help={errors.name}
+                      >
+                        <Input
+                          aria-label="成员名称"
+                          value={draft.name}
+                          onChange={(event) => patchDraft({ name: event.target.value })}
+                        />
+                      </Form.Item>
+                      <Form.Item label="标题 title">
+                        <Input
+                          aria-label="成员标题"
+                          value={draft.title}
+                          onChange={(event) => patchDraft({ title: event.target.value })}
+                        />
+                      </Form.Item>
+                      <div className="member-props-preview">
+                        <span className="member-props-section-label">职责预览</span>
+                        <Typography.Text>
+                          {roleLabel(draft.name || agent.name, draft.title)}
+                        </Typography.Text>
+                      </div>
+                      <div className="member-props-instructions">
+                        <div className="member-props-section-label">
+                          instructions
+                          {instructionsMode && instructionsMode !== 'writable' && (
+                            <Tag className="member-props-readonly-tag">只读</Tag>
+                          )}
+                        </div>
+                        {instructionsMode === 'writable' ? (
+                          <Form.Item
+                            validateStatus={errors.instructions ? 'error' : undefined}
+                            help={
+                              errors.instructions ||
+                              `来源：${configQuery.data.identity.instructions.source || '未知'}${
+                                configQuery.data.identity.instructions.path
+                                  ? ` · ${configQuery.data.identity.instructions.path}`
+                                  : ''
+                              } · ${new TextEncoder().encode(draft.instructions).length} 字节`
+                            }
+                          >
+                            <Input.TextArea
+                              aria-label="成员 instructions"
+                              className="member-props-instructions-input"
+                              autoSize={{ minRows: 6, maxRows: 18 }}
+                              value={draft.instructions}
+                              onChange={(event) => patchDraft({ instructions: event.target.value })}
+                            />
+                          </Form.Item>
+                        ) : (
+                          <>
+                            <Typography.Paragraph type="secondary" className="member-props-help">
+                              {instructionsMode === 'unavailable'
+                                ? configQuery.data.identity.instructions.probeNote ||
+                                  '当前部署不支持在此修改 instructions'
+                                : '当前部署不支持在此修改 instructions'}
+                            </Typography.Paragraph>
+                            <pre className="member-props-readonly-block">
+                              {draft.instructions || '（无内容）'}
+                            </pre>
+                          </>
                         )}
                       </div>
-                      {instructionsMode === 'writable' ? (
-                        <Form.Item
-                          validateStatus={errors.instructions ? 'error' : undefined}
-                          help={
-                            errors.instructions ||
-                            `来源：${configQuery.data.identity.instructions.source || '未知'}${
-                              configQuery.data.identity.instructions.path
-                                ? ` · ${configQuery.data.identity.instructions.path}`
-                                : ''
-                            } · ${new TextEncoder().encode(draft.instructions).length} 字节`
-                          }
-                        >
-                          <Input.TextArea
-                            aria-label="成员 instructions"
-                            className="member-props-instructions-input"
-                            autoSize={{ minRows: 6, maxRows: 18 }}
-                            value={draft.instructions}
-                            onChange={(event) => patchDraft({ instructions: event.target.value })}
-                          />
-                        </Form.Item>
-                      ) : (
-                        <>
-                          <Typography.Paragraph type="secondary" className="member-props-help">
-                            {instructionsMode === 'unavailable'
-                              ? configQuery.data.identity.instructions.probeNote ||
-                                '当前部署不支持在此修改 instructions'
-                              : '当前部署不支持在此修改 instructions'}
-                          </Typography.Paragraph>
-                          <pre className="member-props-readonly-block">
-                            {draft.instructions || '（无内容）'}
-                          </pre>
-                        </>
-                      )}
-                    </div>
-                  </Form>
-                ),
-              },
-              {
-                key: 'memory',
-                label: (
-                  <span>
-                    记忆 <Tag className="member-props-readonly-tag">只读</Tag>
-                  </span>
-                ),
-                children: (
-                  <div className="member-props-memory">
-                    <MemoryBlock
-                      title="会话复用"
-                      source={configQuery.data.memory.sessionReuse.source}
-                      asOf={configQuery.data.memory.sessionReuse.asOf}
-                      fetchedAt={configQuery.data.fetchedAt}
-                    >
-                      <div>
-                        最近运行：{sessionReuseLabel(configQuery.data.memory.sessionReuse.state)}
-                      </div>
-                      {configQuery.data.memory.sessionReuse.detail && (
-                        <Typography.Text type="secondary">
-                          {configQuery.data.memory.sessionReuse.detail}
-                        </Typography.Text>
-                      )}
-                    </MemoryBlock>
-                    <MemoryBlock
-                      title="Handoff"
-                      source={configQuery.data.memory.handoff.source}
-                      asOf={configQuery.data.memory.handoff.asOf}
-                      fetchedAt={configQuery.data.fetchedAt}
-                    >
-                      {configQuery.data.memory.handoff.state === 'available' &&
-                      (configQuery.data.memory.handoff.files || []).length ? (
-                        <ul className="member-props-handoff-list">
-                          {(configQuery.data.memory.handoff.files || []).map((file) => (
-                            <li key={file.path}>
-                              <code>{file.path}</code>
-                              <span>{file.mtime ? freshnessLabel(file.mtime) : ''}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <Typography.Text type="secondary">
-                          {configQuery.data.memory.handoff.state === 'unavailable'
-                            ? 'handoff 不可用'
-                            : '暂无 handoff 文件'}
-                        </Typography.Text>
-                      )}
-                    </MemoryBlock>
-                    <MemoryBlock
-                      title="上下文体积"
-                      source={configQuery.data.memory.contextSize.source}
-                      asOf={configQuery.data.memory.contextSize.asOf}
-                      fetchedAt={configQuery.data.fetchedAt}
-                    >
-                      {configQuery.data.memory.contextSize.state === 'available' ? (
+                    </Form>
+                  ),
+                },
+                {
+                  key: 'memory',
+                  label: (
+                    <span>
+                      记忆 <Tag className="member-props-readonly-tag">只读</Tag>
+                    </span>
+                  ),
+                  children: (
+                    <div className="member-props-memory">
+                      <MemoryBlock
+                        title="会话复用"
+                        source={configQuery.data.memory.sessionReuse.source}
+                        asOf={configQuery.data.memory.sessionReuse.asOf}
+                        fetchedAt={configQuery.data.fetchedAt}
+                      >
                         <div>
-                          最近上下文：约 {configQuery.data.memory.contextSize.approxChars ?? 0}{' '}
-                          {configQuery.data.memory.contextSize.unit || 'chars'}
+                          最近运行：{sessionReuseLabel(configQuery.data.memory.sessionReuse.state)}
                         </div>
-                      ) : (
-                        <Typography.Text type="secondary">暂无统计</Typography.Text>
-                      )}
-                    </MemoryBlock>
-                    <Typography.Paragraph type="secondary" className="member-props-help">
-                      记忆相关数据只读展示，不能在此修改。
-                    </Typography.Paragraph>
-                  </div>
-                ),
-              },
-            ]}
-          />
-        )}
+                        {configQuery.data.memory.sessionReuse.detail && (
+                          <Typography.Text type="secondary">
+                            {configQuery.data.memory.sessionReuse.detail}
+                          </Typography.Text>
+                        )}
+                      </MemoryBlock>
+                      <MemoryBlock
+                        title="Handoff"
+                        source={configQuery.data.memory.handoff.source}
+                        asOf={configQuery.data.memory.handoff.asOf}
+                        fetchedAt={configQuery.data.fetchedAt}
+                      >
+                        {configQuery.data.memory.handoff.state === 'available' &&
+                        (configQuery.data.memory.handoff.files || []).length ? (
+                          <ul className="member-props-handoff-list">
+                            {(configQuery.data.memory.handoff.files || []).map((file) => (
+                              <li key={file.path}>
+                                <code>{file.path}</code>
+                                <span>{file.mtime ? freshnessLabel(file.mtime) : ''}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <Typography.Text type="secondary">
+                            {configQuery.data.memory.handoff.state === 'unavailable'
+                              ? 'handoff 不可用'
+                              : '暂无 handoff 文件'}
+                          </Typography.Text>
+                        )}
+                      </MemoryBlock>
+                      <MemoryBlock
+                        title="上下文体积"
+                        source={configQuery.data.memory.contextSize.source}
+                        asOf={configQuery.data.memory.contextSize.asOf}
+                        fetchedAt={configQuery.data.fetchedAt}
+                      >
+                        {configQuery.data.memory.contextSize.state === 'available' ? (
+                          <div>
+                            最近上下文：约 {configQuery.data.memory.contextSize.approxChars ?? 0}{' '}
+                            {configQuery.data.memory.contextSize.unit || 'chars'}
+                          </div>
+                        ) : (
+                          <Typography.Text type="secondary">暂无统计</Typography.Text>
+                        )}
+                      </MemoryBlock>
+                      <Typography.Paragraph type="secondary" className="member-props-help">
+                        记忆相关数据只读展示，不能在此修改。
+                      </Typography.Paragraph>
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          )}
       </Drawer>
 
       <Modal
@@ -561,6 +564,8 @@ export function MemberPropsDrawer({ company, agent, open, onClose }: Props) {
         className="member-props-diff-modal"
         width={560}
         destroyOnHidden
+        transitionName=""
+        maskTransitionName=""
       >
         <div className="member-props-diff">
           <div className="member-props-section-label">变更预览（仅将写入的键）</div>

@@ -268,7 +268,12 @@ export function TaskPanel({
                     ? selectedDetail.runId === row.run?.id
                     : selectedDetail?.kind === 'task' &&
                       row.kind === 'task' &&
-                      selectedDetail.taskId === (row.task?.id || row.event?.issueId);
+                      (selectedDetail.taskId === (row.task?.id || row.event?.issueId) ||
+                        selectedDetail.taskId === (row.task?.identifier || row.event?.issue) ||
+                        Boolean(
+                          selectedDetail.identifier &&
+                          selectedDetail.identifier === (row.task?.identifier || row.event?.issue),
+                        ));
               return (
                 <Fragment key={row.key}>
                   {day && day !== previousDay && (

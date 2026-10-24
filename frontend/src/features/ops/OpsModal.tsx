@@ -1,4 +1,5 @@
 import { Alert, Button, Card, Modal, Spin } from 'antd';
+import { RightOutlined } from '@ant-design/icons';
 import type { OpsIssue, OpsResponse } from '../../api/types';
 import { useRoomQuery } from '../../hooks/useRoomQuery';
 
@@ -6,10 +7,14 @@ export function OpsModal({
   company,
   open,
   onClose,
+  onSelectIssue,
+  onSelectPreflight,
 }: {
   company: string;
   open: boolean;
   onClose: () => void;
+  onSelectIssue?: (item: OpsIssue) => void;
+  onSelectPreflight?: (agentName: string) => void;
 }) {
   const query = useRoomQuery<OpsResponse>('/api/ops', company, undefined, 30000);
   const data = query.data;
@@ -23,10 +28,17 @@ export function OpsModal({
         <div className="ops-list">
           {items.length
             ? items.map((item, index) => (
-                <div className="ops-row" key={item.id || `${item.identifier}:${index}`}>
+                <button
+                  type="button"
+                  className="ops-row ops-row-button"
+                  key={item.id || `${item.identifier}:${index}`}
+                  onClick={() => onSelectIssue?.(item)}
+                >
                   <div className="ops-row-title">
                     <code>{item.identifier}</code>
                     <strong>{item.title}</strong>
+                    {item.owner && <span className="ops-row-owner">{item.owner}</span>}
+                    <RightOutlined className="ops-row-chevron" />
                   </div>
                   <div className="ops-row-meta">
                     {item.action || item.prompt || item.waitingOn || item.owner || '未写明解除条件'}
@@ -34,7 +46,7 @@ export function OpsModal({
                     {item.silentHours != null ? ` · 静默 ${item.silentHours}h` : ''}
                     {item.idleMinutes != null ? ` · 静默 ${Math.round(item.idleMinutes)} 分钟` : ''}
                   </div>
-                </div>
+                </button>
               ))
             : empty}
         </div>
@@ -50,6 +62,8 @@ export function OpsModal({
       onCancel={onClose}
       footer={null}
       width={760}
+      transitionName=""
+      maskTransitionName=""
     >
       {query.isPending && <Spin />}
       {query.isError && (
@@ -92,10 +106,19 @@ export function OpsModal({
             <div className="ops-list">
               {data.preflight.length
                 ? data.preflight.map((item, index) => (
-                    <div className="ops-row" key={index}>
-                      <strong>{item.agent}</strong>
+                    <button
+                      type="button"
+                      className="ops-row ops-row-button"
+                      key={index}
+                      onClick={() => onSelectPreflight?.(item.agent)}
+                    >
+                      <div className="ops-row-title">
+                        <strong>{item.agent}</strong>
+                        <span className="ops-row-owner">检查成员配置</span>
+                        <RightOutlined className="ops-row-chevron" />
+                      </div>
                       <div className="ops-row-meta">{item.detail}</div>
-                    </div>
+                    </button>
                   ))
                 : empty}
             </div>

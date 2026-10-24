@@ -48,6 +48,8 @@ export function CreateTaskModal({
       cancelButtonProps={{ disabled: mutation.isPending, 'aria-label': '取消' }}
       onCancel={onClose}
       onOk={() => form.submit()}
+      transitionName=""
+      maskTransitionName=""
     >
       <Form
         form={form}

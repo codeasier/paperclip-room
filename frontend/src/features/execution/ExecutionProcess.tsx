@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { Alert, Button, Collapse, Empty, Typography } from 'antd';
 import { apiUrl, getJSON } from '../../api/client';
@@ -16,6 +17,8 @@ export function ExecutionProcess({
   runId: string;
   agentName: string;
 }) {
+  const [openKeys, setOpenKeys] = useState<string[]>([]);
+  const [hideTools, setHideTools] = useState(false);
   const query = useInfiniteQuery({
     queryKey: ['/api/run', company, agentId, runId],
     initialPageParam: 0,
@@ -56,6 +59,14 @@ export function ExecutionProcess({
   const calls = new Set(
     entries.filter((entry) => entry.kind === 'tool_call').map((entry) => entry.toolCallId),
   );
+  const toolEntryIds = entries
+    .filter(
+      (entry) =>
+        entry.kind === 'tool_call' ||
+        (entry.kind === 'tool_result' && !calls.has(entry.toolCallId)),
+    )
+    .map((entry) => entry.id);
+  const allExpanded = toolEntryIds.length > 0 && toolEntryIds.every((id) => openKeys.includes(id));
   const toolBody = (entry: TranscriptEntry) => (
     <>
       <pre>{entry.text}</pre>
@@ -81,7 +92,32 @@ export function ExecutionProcess({
           运行：{runId}
         </div>
       </div>
-      <Typography.Title level={5}>工具调用与助手消息</Typography.Title>
+      <div className="execution-heading-row">
+        <Typography.Title level={5}>工具调用与助手消息</Typography.Title>
+        {toolEntryIds.length >= 2 && (
+          <div className="execution-tools-actions">
+            <button
+              type="button"
+              className="execution-action-link"
+              onClick={() => {
+                setHideTools(false);
+                setOpenKeys(allExpanded ? [] : toolEntryIds);
+              }}
+            >
+              {allExpanded ? '收起全部参数' : `展开全部 (${toolEntryIds.length})`}
+            </button>
+            {toolEntryIds.length >= 4 && (
+              <button
+                type="button"
+                className="execution-action-link"
+                onClick={() => setHideTools((prev) => !prev)}
+              >
+                {hideTools ? `显示 ${toolEntryIds.length} 条工具调用` : '仅看助手结论'}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
       {run.state !== 'available' && (
         <div className="execution-warning">
           {run.note || '会话详情不可用，仅展示已记录的运行结果。'}
@@ -121,6 +157,7 @@ export function ExecutionProcess({
             </article>
           );
         if (entry.kind === 'tool_result' && calls.has(entry.toolCallId)) return null;
+        if (hideTools) return null;
         const result = entry.kind === 'tool_call' ? results.get(entry.toolCallId) : entry;
         const terminal = !['running', 'queued', 'cancelling'].includes(run.status);
         let preview = entry.text;
@@ -130,11 +167,18 @@ export function ExecutionProcess({
         } catch {
           /* plain tool arguments */
         }
+        const isOpen = openKeys.includes(entry.id);
         return (
           <Collapse
             key={entry.id}
             className="tool-step"
             size="small"
+            activeKey={isOpen ? [entry.id] : []}
+            onChange={() =>
+              setOpenKeys((prev) =>
+                prev.includes(entry.id) ? prev.filter((k) => k !== entry.id) : [...prev, entry.id],
+              )
+            }
             expandIcon={() => (
               <span className="tool-result-icon">
                 {result ? (result.isError ? '!' : '✓') : '›'}
@@ -156,6 +200,9 @@ export function ExecutionProcess({
                           ? '未记录结果'
                           : '执行中'}
                     </Typography.Text>
+                    <span className="tool-chevron" aria-hidden="true">
+                      {isOpen ? '▾' : '▸'}
+                    </span>
                   </span>
                 ),
                 children: (

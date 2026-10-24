@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Drawer } from 'antd';
 import type { RoomEvent, Task } from '../../api/types';
 import { Markdown } from '../../components/Markdown';
@@ -10,7 +10,13 @@ import { ExecutionProcess } from '../execution/ExecutionProcess';
 
 export type Detail =
   | { kind: 'overview' }
-  | { kind: 'task'; taskId: string; runId?: string }
+  | {
+      kind: 'task';
+      taskId: string;
+      runId?: string;
+      identifier?: string;
+      fallbackTitle?: string;
+    }
   | { kind: 'run'; runId: string }
   | { kind: 'message'; event: RoomEvent };
 interface Props {
@@ -31,6 +37,7 @@ export function DetailDrawer({
   onChange,
   onClose,
 }: Props) {
+  const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -40,7 +47,12 @@ export function DetailDrawer({
   }, [onClose]);
   const task =
     detail.kind === 'task'
-      ? tasks.find((task) => task.id === detail.taskId)
+      ? tasks.find(
+          (task) =>
+            task.id === detail.taskId ||
+            task.identifier === detail.taskId ||
+            (detail.identifier && task.identifier === detail.identifier),
+        )
       : detail.kind === 'run'
         ? tasks.find((task) => task.attempts.some((run) => run.id === detail.runId))
         : undefined;
@@ -166,12 +178,32 @@ export function DetailDrawer({
             {task ? (runId ? '运行与任务详情' : '任务详情') : '运行详情'}
           </div>
           <h3 className="detail-title">
-            {task ? `${task.identifier} · ${task.title}` : '运行过程'}
+            {task
+              ? `${task.identifier} · ${task.title}`
+              : detail.kind === 'task' && detail.identifier
+                ? `${detail.identifier}${detail.fallbackTitle ? ` · ${detail.fallbackTitle}` : ''}`
+                : '运行过程'}
           </h3>
           {task && (
-            <div className="detail-task-status">
-              <span>任务：</span>
-              <StatusTag status={task.status} />
+            <div className="detail-task-meta-bar">
+              <div className="detail-task-status">
+                <span>任务：</span>
+                <StatusTag status={task.status} />
+              </div>
+              <span className="detail-priority-badge">
+                优先级{' '}
+                {
+                  (
+                    { critical: 'P0', high: 'P1', medium: 'P2', low: 'P3' } as Record<
+                      string,
+                      string
+                    >
+                  )[task.priority || 'medium']
+                }
+              </span>
+              {elapsed > 0 && (
+                <span className="detail-elapsed-badge">累计 {duration(elapsed)}</span>
+              )}
             </div>
           )}
           {runId ? (
@@ -260,18 +292,38 @@ export function DetailDrawer({
               {!!task.comments.latest.length && (
                 <>
                   <div className="task-sub">最近讨论</div>
-                  {[...task.comments.latest].reverse().map((comment) => (
-                    <article className="task-comment" key={comment.id}>
-                      <div className="who">
-                        <strong>{comment.author}</strong>
-                        <span>
-                          {dayLabel(comment.ts)} {clockLabel(comment.ts)}
-                        </span>
-                      </div>
-                      <div className="task-comment-text">{comment.text}</div>
-                      {comment.truncated && <div className="task-facts">内容过长，已截断。</div>}
-                    </article>
-                  ))}
+                  {[...task.comments.latest].reverse().map((comment) => {
+                    const isLong = comment.text.length > 180 || comment.text.split('\n').length > 4;
+                    const isExpanded = Boolean(expandedComments[comment.id]);
+                    return (
+                      <article className="task-comment" key={comment.id}>
+                        <div className="who">
+                          <strong>{comment.author}</strong>
+                          <span>
+                            {dayLabel(comment.ts)} {clockLabel(comment.ts)}
+                          </span>
+                          {isLong && (
+                            <button
+                              type="button"
+                              className="comment-expand-btn"
+                              onClick={() =>
+                                setExpandedComments((prev) => ({
+                                  ...prev,
+                                  [comment.id]: !prev[comment.id],
+                                }))
+                              }
+                            >
+                              {isExpanded ? '收起' : '展开'}
+                            </button>
+                          )}
+                        </div>
+                        <div className={`task-comment-text ${isExpanded ? 'expanded' : ''}`}>
+                          <Markdown text={comment.text} />
+                        </div>
+                        {comment.truncated && <div className="task-facts">内容过长，已截断。</div>}
+                      </article>
+                    );
+                  })}
                 </>
               )}
               {!!task.runs.total && (
