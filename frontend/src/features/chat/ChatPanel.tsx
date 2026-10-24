@@ -32,12 +32,15 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
   const enabled = query.data?.state === 'new' || query.data?.state === 'available';
   const messages = query.data?.messages || [];
   const lastMessage = messages.at(-1);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const mutation = useMutation({
     mutationKey,
     mutationFn: (text: string) =>
       postJSON(apiUrl('/api/chat', company), { agentId: agent.id, text }),
-    onSuccess: () => {
-      onDraft('');
+    onSuccess: (_data, text) => {
+      // Do not wipe text typed while this send was in flight.
+      if (draftRef.current.trim() === text) onDraft('');
       setAwaitingAfter(lastMessage?.id || '');
       stickToBottom.current = true;
       void client.invalidateQueries({ queryKey: ['/api/chat', company, agent.id] });

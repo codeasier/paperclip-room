@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CodeFenceCard } from './CodeFenceCard';
 import { isEmptyFence, parseInfoString } from '../lib/codeFence';
+import { isHtmlOnly } from '../lib/markdown';
 
 export type MarkdownVariant = 'agent' | 'user';
 
@@ -67,9 +68,14 @@ export function Markdown({ text, variant = 'agent', components }: MarkdownProps)
 
   return (
     <div className={className}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={merged}>
-        {text}
-      </ReactMarkdown>
+      {isHtmlOnly(text) ? (
+        // skipHtml would erase the whole message and leave a zero-height bubble.
+        <p>{text}</p>
+      ) : (
+        <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={merged}>
+          {text}
+        </ReactMarkdown>
+      )}
     </div>
   );
 }
