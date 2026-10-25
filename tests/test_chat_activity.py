@@ -17,6 +17,7 @@ class ChatActivityTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.path = Path(self.temp.name) / "state.db"
         self.db = sqlite3.connect(self.path)
+        self.db.execute("CREATE TABLE sessions(id TEXT PRIMARY KEY, started_at REAL)")
         self.db.execute(
             "CREATE TABLE messages(id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,"
             " tool_calls TEXT, tool_call_id TEXT, tool_name TEXT, timestamp REAL, reasoning TEXT,"
@@ -40,11 +41,11 @@ class ChatActivityTests(unittest.TestCase):
         self.db.close()
         self.temp.cleanup()
 
-    def add(self, mid, role, content="", calls=None, name=None, ts=None, reasoning=""):
+    def add(self, mid, role, content="", calls=None, name=None, ts=None, reasoning="", sid="session-1"):
         self.db.execute(
             "INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
-                mid, "session-1", role, content,
+                mid, sid, role, content,
                 json.dumps(calls) if calls else None,
                 "call-1" if role == "tool" else None,
                 name, self.started + 10 + mid if ts is None else ts,
@@ -94,6 +95,24 @@ class ChatActivityTests(unittest.TestCase):
         self.add(2, "tool", '{"output":"boom","exit_code":1}', name="terminal")
         data = server.chat_activity(self.run_meta)
         self.assertTrue(data["steps"][-1]["isError"])
+
+    def test_running_run_uses_session_before_until_finished(self):
+        self.add(1, "assistant", "", [{"id": "c1", "function": {"name": "terminal", "arguments": '{"command":"git status"}'}}])
+        live = {**self.run_meta, "sessionIdAfter": None, "sessionIdBefore": "session-1"}
+        data = server.chat_activity(live)
+        self.assertEqual(data["state"], "available")
+        self.assertEqual(data["steps"][0]["text"], "git status")
+
+    def test_new_session_is_found_by_start_time_when_no_id_is_known(self):
+        self.db.execute("INSERT INTO sessions VALUES (?,?)", ("session-2", self.started + 12))
+        self.db.commit()
+        self.add(1, "assistant", "", [{"id": "c1", "function": {"name": "terminal", "arguments": '{"command":"ls"}'}}], sid="session-2")
+        self.assertEqual(server.chat_activity({**self.run_meta, "sessionIdAfter": None})["state"], "available")
+        server._CACHE.clear()
+        self.db.execute("INSERT INTO sessions VALUES (?,?)", ("session-3", self.started + 30))
+        self.db.commit()
+        ambiguous = server.chat_activity({**self.run_meta, "sessionIdAfter": None})
+        self.assertEqual(ambiguous["state"], "unavailable")
 
     def test_tool_output_json_wrapper_is_stripped(self):
         self.add(1, "assistant", "", [{"id": "c1", "function": {"name": "terminal", "arguments": '{"command":"ls"}'}}])

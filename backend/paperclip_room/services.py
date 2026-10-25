@@ -854,10 +854,28 @@ def _tool_output(content):
     return display_content(content or "")
 
 
+def _session_of_run(run, db):
+    """运行中的 sessionIdAfter 还是空的；先用 sessionIdBefore，再按开始时间找唯一新会话。"""
+    sid = run.get("sessionIdAfter") or run.get("sessionIdBefore")
+    if sid:
+        return sid
+    start = _ts(run.get("startedAt") or run.get("createdAt"))
+    if not start:
+        return None
+    try:
+        rows = db.execute(
+            "SELECT id FROM sessions WHERE started_at>=? AND started_at<=? ORDER BY started_at",
+            (start - 5, start + 120),
+        ).fetchall()
+    except sqlite3.Error:
+        return None
+    # 同一时间窗里出现多个会话说明无法确定归属，宁可说读不到，也不混用别的会话。
+    return rows[0]["id"] if len(rows) == 1 else None
+
+
 def _session_tail(run, limit):
     """按 Paperclip 记录的会话标识读取本次运行窗口；找不到会话返回 None。"""
-    sid = run.get("sessionIdAfter")
-    if not sid or not HERMES_DB.is_file():
+    if not HERMES_DB.is_file():
         return None
     start = _ts(run.get("startedAt") or run.get("createdAt")) - 2
     finish = _ts(run.get("finishedAt"))
@@ -865,6 +883,9 @@ def _session_tail(run, limit):
     try:
         with closing(sqlite3.connect(HERMES_DB.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)) as db:
             db.row_factory = sqlite3.Row
+            sid = _session_of_run(run, db)
+            if not sid:
+                return None
             rows = db.execute(
                 "SELECT id,role,content,tool_calls,tool_name,reasoning,reasoning_content,timestamp"
                 " FROM messages WHERE session_id=? AND role IN ('assistant','tool')"
@@ -884,7 +905,7 @@ def chat_activity(run):
     def _load():
         rows = _session_tail(run, CHAT_ACTIVITY_STEPS * 2)
         if rows is None:
-            return {"state": "unavailable", "steps": [], "note": "会话库不可读，暂时只能看运行状态与耗时。"}
+            return {"state": "unavailable", "steps": [], "note": "暂时定位不到这次运行的会话记录，只能看运行状态与耗时。"}
         if not rows:
             return {"state": "pending", "steps": [], "note": "这一轮还没有可读的助手或工具记录。"}
         steps = []
