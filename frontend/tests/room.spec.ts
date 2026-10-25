@@ -970,6 +970,8 @@ async function timelineFixture(page: Page, steps: ActivityStep[] = []) {
     runs: [{ id: 'chat-run', status: 'running', startedAt: turnIso(0) }] as ChatActivityRun[],
     steps: { 'chat-run': steps } as Record<string, ActivityStep[]>,
     activityRequests: [] as string[],
+    activityResponseDelayMs: 0,
+    chatRequests: 0,
     writes: [] as string[],
   };
   await page.route('**/api/**', async (route) => {
@@ -983,10 +985,14 @@ async function timelineFixture(page: Page, steps: ActivityStep[] = []) {
     if (url.pathname === '/api/chat-activity') {
       const id = url.searchParams.get('run') || '';
       model.activityRequests.push(id);
-      const steps = model.steps[id] || [];
+      const steps = [...(model.steps[id] || [])];
+      // Intentional server latency is outside the browser clock; notifications must still reach React.
+      if (model.activityResponseDelayMs)
+        await new Promise((resolve) => setTimeout(resolve, model.activityResponseDelayMs));
       await route.fulfill({ json: { state: steps.length ? 'available' : 'pending', steps } });
       return;
     }
+    if (url.pathname === '/api/chat') model.chatRequests += 1;
     const activeRuns = model.runs.filter((run) => ['running', 'queued'].includes(run.status));
     const live = {
       running: activeRuns.filter((run) => run.status === 'running').length,
@@ -1029,15 +1035,6 @@ async function timelineFixture(page: Page, steps: ActivityStep[] = []) {
     await route.fulfill({ json: payload[url.pathname] || {} });
   });
   return model;
-}
-
-async function installTimelineClock(page: Page) {
-  await page.clock.install({ time: new Date() });
-}
-
-async function pauseTimelineClock(page: Page) {
-  // Initial query notifications must settle before freezing their setTimeout callbacks.
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
 }
 
 const bottomGap = (page: Page) =>
@@ -1206,7 +1203,6 @@ test('interleaves thinking, assistant messages and exactly paired parallel tools
 test('independently expands full multiline thinking and tools and preserves open events through polling', async ({
   page,
 }) => {
-  await installTimelineClock(page);
   const thoughtText = '第一行：核对任务\n第二行：保留完整推理\n\n第四行：独立展开';
   const command = 'python - <<\'PY\'\nprint("first")\nprint("second")\nPY';
   const traceback =
@@ -1319,9 +1315,9 @@ test('independently expands full multiline thinking and tools and preserves open
   await expect(tools.nth(0)).toHaveJSProperty('open', false);
   await expect(tool).not.toContainText('上一回合独有结果');
 
-  await pauseTimelineClock(page);
+  model.activityResponseDelayMs = 250;
   const activeRequests = model.activityRequests.filter((id) => id === 'chat-run').length;
-  expect(activeRequests).toBe(1);
+  expect(activeRequests).toBeGreaterThanOrEqual(1);
   expect(model.activityRequests.filter((id) => id === 'older-run')).toHaveLength(1);
   model.steps['chat-run'].push({
     id: 'next-thought',
@@ -1329,11 +1325,14 @@ test('independently expands full multiline thinking and tools and preserves open
     ts: turnIso(6000),
     text: '轮询新到的思考',
   });
-  await page.clock.runFor(3100);
-  await expect(thoughts).toHaveCount(3);
+  // Keep real timers running: fetch/json completion can schedule React Query's setTimeout(0)
+  // notification after any fixed virtual-time slice has ended.
+  await expect(thoughts).toHaveCount(3, { timeout: 10_000 });
   await expect(thought).toHaveAttribute('data-event-id', thoughtId!);
   await expect(tool).toHaveAttribute('data-event-id', toolId!);
-  expect(model.activityRequests.filter((id) => id === 'chat-run')).toHaveLength(activeRequests + 1);
+  expect(model.activityRequests.filter((id) => id === 'chat-run').length).toBeGreaterThan(
+    activeRequests,
+  );
   expect(model.activityRequests.filter((id) => id === 'older-run')).toHaveLength(1);
   await expect(thought).toHaveJSProperty('open', true);
   await expect(tool).toHaveJSProperty('open', true);
@@ -1352,7 +1351,6 @@ test('independently expands full multiline thinking and tools and preserves open
 test('retains completed activity after reload without duplicating the posted final comment', async ({
   page,
 }) => {
-  await installTimelineClock(page);
   const finalText = '**最终答复**\n\n检查完成，请人工验收。';
   const model = await timelineFixture(page, [
     {
@@ -1393,7 +1391,6 @@ test('retains completed activity after reload without duplicating the posted fin
     .filter({ hasText: '最终答复' });
   await expect(finalBubbles).toHaveCount(2);
   await expect(page.locator('details.chat-event')).toHaveCount(2);
-  await pauseTimelineClock(page);
   model.runs[0] = { ...model.runs[0], status: 'succeeded', finishedAt: turnIso(5000) };
   model.messages.push({
     id: 'posted-final',
@@ -1402,12 +1399,12 @@ test('retains completed activity after reload without duplicating the posted fin
     ts: turnIso(6000),
     text: finalText,
   });
-  await page.clock.runFor(6100);
-  await expect(page.locator('.chat-inner').getByRole('status')).toHaveCount(0);
+  await expect(page.locator('.chat-inner').getByRole('status')).toHaveCount(0, {
+    timeout: 10_000,
+  });
   await expect(finalBubbles).toHaveCount(2);
   await expect(page.locator('details.chat-event')).toHaveCount(2);
 
-  await page.clock.resume();
   model.activityRequests.length = 0;
   await page.reload();
   await expect(finalBubbles).toHaveCount(2);
@@ -1421,8 +1418,12 @@ test('retains completed activity after reload without duplicating the posted fin
   await expect(
     page.locator('details.chat-event.tool').getByText('verified', { exact: true }),
   ).toBeVisible();
-  await pauseTimelineClock(page);
-  await page.clock.runFor(9100);
+  // Observe two subsequent real chat polls with timers still running.
+  // Completed activity must stay at its one reload read throughout this observation window.
+  const chatRequests = model.chatRequests;
+  await expect
+    .poll(() => model.chatRequests, { timeout: 12_000 })
+    .toBeGreaterThanOrEqual(chatRequests + 2);
   expect(model.activityRequests).toEqual(['chat-run']);
   await expect(finalBubbles).toHaveCount(2);
   expect(model.writes).toEqual([]);
@@ -1446,7 +1447,6 @@ test('activity polling follows the bottom only while the reader remains sticky',
   page,
 }) => {
   await page.setViewportSize({ width: 1100, height: 760 });
-  await installTimelineClock(page);
   const model = await timelineFixture(page, [
     { id: 'scroll-thought', kind: 'thinking', ts: turnIso(1000), text: '准备继续输出' },
   ]);
@@ -1463,7 +1463,7 @@ test('activity polling follows the bottom only while the reader remains sticky',
   const stream = page.locator('.chat-stream');
   await expect(page.locator('details.chat-event.thinking')).toHaveCount(1);
   await expect.poll(() => bottomGap(page)).toBeLessThan(4);
-  await pauseTimelineClock(page);
+  model.activityResponseDelayMs = 250;
   const initialHeight = await stream.evaluate((element) => element.scrollHeight);
   model.steps['chat-run'].push({
     id: 'sticky-reply',
@@ -1471,10 +1471,11 @@ test('activity polling follows the bottom only while the reader remains sticky',
     ts: turnIso(2000),
     text: `贴底时新增回复\n\n${'新输出应自动跟随。\n\n'.repeat(12)}`,
   });
-  await page.clock.runFor(3100);
+  const stickyRequests = model.activityRequests.length;
   await expect(
     page.locator('article.chat-message.agent').filter({ hasText: '贴底时新增回复' }),
-  ).toHaveCount(1);
+  ).toHaveCount(1, { timeout: 10_000 });
+  expect(model.activityRequests.length).toBeGreaterThan(stickyRequests);
   expect(await stream.evaluate((element) => element.scrollHeight)).toBeGreaterThan(
     initialHeight + 100,
   );
@@ -1492,9 +1493,10 @@ test('activity polling follows the bottom only while the reader remains sticky',
     ts: turnIso(3000),
     text: `回看时新增回复\n\n${'不要把读者强制拉回底部。\n\n'.repeat(12)}`,
   });
-  await page.clock.runFor(3100);
+  const nonstickyRequests = model.activityRequests.length;
   const newReply = page.locator('article.chat-message.agent').filter({ hasText: '回看时新增回复' });
-  await expect(newReply).toHaveCount(1);
+  await expect(newReply).toHaveCount(1, { timeout: 10_000 });
+  expect(model.activityRequests.length).toBeGreaterThan(nonstickyRequests);
   await expect(newReply).not.toBeInViewport();
   expect(await stream.evaluate((element) => element.scrollTop)).toBeCloseTo(readingTop, 0);
   await expect(page.getByRole('button', { name: '回到最新消息' })).toBeVisible();
