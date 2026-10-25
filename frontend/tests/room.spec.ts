@@ -948,3 +948,68 @@ test('interactive task-context banner and ops modal navigation to task detail an
   await expect(page.getByRole('heading', { name: 'QA', exact: true })).toBeVisible();
   await expect(page.getByText('成员属性 · QA')).toBeVisible();
 });
+
+test('shows chat turn state instead of a silent gap while the member works', async ({ page }) => {
+  await fixture(page);
+  const waitingSince = new Date(Date.now() - 45_000).toISOString();
+  await page.route('**/api/state?**', (route) =>
+    route.fulfill({
+      json: {
+        companyId: 'c1',
+        agents: [
+          {
+            ...agent('pl', 'PL'),
+            live: {
+              running: 1,
+              queued: 0,
+              taskRunning: 0,
+              backgroundRunning: 1,
+              runs: [
+                {
+                  id: 'chat-run',
+                  status: 'running',
+                  issueId: 'chat-pl',
+                  startedAt: waitingSince,
+                  lastOutputAt: new Date(Date.now() - 8_000).toISOString(),
+                  linked: false,
+                },
+              ],
+            },
+          },
+          agent('qa', 'QA'),
+        ],
+        liveRunning: 1,
+        liveQueued: 0,
+        liveTaskRunning: 0,
+        liveBackgroundRunning: 1,
+      },
+    }),
+  );
+  await page.route('**/api/chat?**', (route) => {
+    const isPl = new URL(route.request().url()).searchParams.get('agent') === 'pl';
+    return route.fulfill({
+      json: {
+        state: 'available',
+        chat: { id: isPl ? 'chat-pl' : 'chat-qa' },
+        messages: [
+          {
+            id: 'ask',
+            author: 'user',
+            authorName: '我',
+            ts: waitingSince,
+            text: '还有哪些任务要人工介入？',
+          },
+        ],
+      },
+    });
+  });
+
+  await page.goto('/');
+  const status = page.getByRole('status');
+  await expect(status).toContainText('PL 正在处理…');
+  await expect(status).toContainText('前有输出');
+
+  // 没有运行接管时要如实说"已送达，等待"，而不是重复"正在处理"
+  await page.getByRole('button', { name: /^QA ·/ }).click();
+  await expect(status).toContainText('已送达，等待 QA 处理…');
+});
