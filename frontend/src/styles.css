@@ -902,9 +902,9 @@ a:focus-visible {
   flex-direction: column;
   gap: 4px;
 }
-.chat-activity-note {
-  margin: 0 0 0 39px;
+.activity-hint {
   font-size: 12px;
+  line-height: 1.5;
   color: var(--ink-3);
 }
 .activity-head {
@@ -969,9 +969,6 @@ a:focus-visible {
   .chat-activity {
     margin-left: 0;
     max-width: none;
-  }
-  .chat-activity-note {
-    margin-left: 0;
   }
 }
 @keyframes chat-reply-pulse {

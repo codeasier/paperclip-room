@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiUrl, getJSON } from '../../api/client';
 import type { ChatActivityResponse } from '../../api/types';
-import { activityRows, activitySummary } from '../../lib/chatActivity';
+import { activityHint, activityRows, activitySummary } from '../../lib/chatActivity';
 
 /**
  * 回合进行中的实时过程：思考、工具调用与输出。
@@ -29,25 +29,30 @@ export function ChatActivity({
     retry: false,
   });
   const steps = query.data?.steps || [];
-  if (!steps.length) {
-    if (query.data?.state !== 'unavailable') return null;
-    return <p className="chat-activity-note">{query.data.note || '过程暂不可读'}</p>;
-  }
   const rows = activityRows(steps);
   const visible = open ? rows : activitySummary(steps);
+  // 模型回答前会话里还没有任何记录，这时也要有一张卡片说明"在等什么"，不能整块消失。
+  const hint = activityHint({
+    failed: query.isError,
+    state: query.data?.state,
+    note: query.data?.note,
+  });
   return (
     <div className="chat-activity" role="group" aria-label="对话过程">
       <div className="activity-head">
         <span className="activity-title">过程</span>
-        <button
-          type="button"
-          className="activity-toggle"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-        >
-          {open ? '收起' : `展开 ${rows.length} 步`}
-        </button>
+        {rows.length > 0 && (
+          <button
+            type="button"
+            className="activity-toggle"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+          >
+            {open ? '收起' : `展开 ${rows.length} 步`}
+          </button>
+        )}
       </div>
+      {rows.length === 0 && <div className="activity-hint">{hint}</div>}
       {visible.map((row) => (
         <div key={row.id} className={`activity-row ${row.tone}${row.error ? ' error' : ''}`}>
           <span className="activity-tag">{row.label}</span>

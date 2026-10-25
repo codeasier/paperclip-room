@@ -50,3 +50,11 @@ export function activitySummary(steps: ActivityStep[]): ActivityRow[] {
     Boolean(row),
   );
 }
+
+/** 还没有步骤时该说什么：不同原因不能都显示成同一句"加载中"。 */
+export function activityHint(input: { failed: boolean; state?: string; note?: string }) {
+  if (input.failed) return '过程读取失败，稍后自动重试';
+  if (input.state === 'unavailable') return input.note || '暂时读不到这次运行的会话记录';
+  if (input.state === 'pending') return '等待模型的第一个输出；写入会话后自动出现';
+  return '正在连接会话…';
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActivityStep } from '../api/types';
-import { activityRows, activitySummary, oneLine } from './chatActivity';
+import { activityHint, activityRows, activitySummary, oneLine } from './chatActivity';
 
 function step(overrides: Partial<ActivityStep>): ActivityStep {
   return { id: 's1', kind: 'thinking', text: '思考内容', ...overrides };
@@ -39,6 +39,15 @@ describe('chat activity rows', () => {
 
   it('marks empty tool output instead of showing a blank row', () => {
     expect(activityRows([step({ kind: 'tool_result', text: '  ' })])[0].text).toBe('（无输出）');
+  });
+
+  it('says what it is waiting for instead of a generic loading line', () => {
+    expect(activityHint({ failed: false, state: 'pending' })).toContain('等待模型的第一个输出');
+    expect(activityHint({ failed: true, state: 'available' })).toContain('读取失败');
+    expect(activityHint({ failed: false, state: 'unavailable', note: '会话库不可读' })).toBe(
+      '会话库不可读',
+    );
+    expect(activityHint({ failed: false })).toBe('正在连接会话…');
   });
 
   it('truncates long single-line text with an ellipsis', () => {
