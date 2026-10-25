@@ -68,6 +68,15 @@ describe('conversation reply state', () => {
     expect(replyLabel(state!, 'PL')).toBe('PL 正在处理…（已 2分0秒，10秒前有输出）');
   });
 
+  it('keeps live status after intermediate assistant prose while tools still run', () => {
+    const messages = [
+      message('user', '2026-10-25T02:08:00Z'),
+      message('agent', '2026-10-25T02:09:00Z'),
+    ];
+    expect(replyState({ messages, run: run(), now })?.phase).toBe('running');
+    expect(replyState({ messages, now })).toBeNull();
+  });
+
   it('separates a queued wake from an unacknowledged message', () => {
     const messages = [message('user', '2026-10-25T02:09:30Z')];
     const queued = replyState({ messages, run: run({ status: 'queued' }), now });

@@ -63,16 +63,26 @@ export interface ActivityStep {
   text: string;
   truncated?: boolean;
   name?: string;
+  toolCallId?: string;
   isError?: boolean;
 }
 export interface ChatActivityResponse {
   state: 'available' | 'pending' | 'unavailable';
   steps: ActivityStep[];
+  hasEarlierSteps?: boolean;
   note?: string;
+}
+export interface ChatActivityRun {
+  id: string;
+  status: string;
+  startedAt?: string;
+  createdAt?: string;
+  finishedAt?: string;
 }
 export interface ChatResponse {
   state: 'available' | 'new' | 'disabled' | 'unavailable';
   messages: Message[];
+  activityRuns?: ChatActivityRun[];
   note?: string;
   chat?: { id: string; conversationState?: string; status?: string };
 }

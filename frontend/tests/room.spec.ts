@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import type { ActivityStep, ChatActivityRun, Message } from '../src/api/types';
 
 const now = Date.now() - 300000;
 const iso = (offset: number) => new Date(now + offset).toISOString();
@@ -949,89 +950,624 @@ test('interactive task-context banner and ops modal navigation to task detail an
   await expect(page.getByText('成员属性 · QA')).toBeVisible();
 });
 
-test('shows chat turn state instead of a silent gap while the member works', async ({ page }) => {
-  await fixture(page);
-  const waitingSince = new Date(Date.now() - 45_000).toISOString();
-  await page.route('**/api/state?**', (route) =>
-    route.fulfill({
-      json: {
-        companyId: 'c1',
-        agents: [
-          {
-            ...agent('pl', 'PL'),
-            live: {
-              running: 1,
-              queued: 0,
-              taskRunning: 0,
-              backgroundRunning: 1,
-              runs: [
-                {
-                  id: 'chat-run',
-                  status: 'running',
-                  issueId: 'chat-pl',
-                  startedAt: waitingSince,
-                  lastOutputAt: new Date(Date.now() - 8_000).toISOString(),
-                  linked: false,
-                },
-              ],
-            },
-          },
-          agent('qa', 'QA'),
-        ],
-        liveRunning: 1,
-        liveQueued: 0,
-        liveTaskRunning: 0,
-        liveBackgroundRunning: 1,
+const turnStart = Date.now() - 45_000;
+const turnIso = (offset: number) => new Date(turnStart + offset).toISOString();
+const thinkingSummary = 'summary[aria-label="思考过程"]';
+const toolSummary = (name: string) => `summary[aria-label="工具调用 ${name}"]`;
+
+// Mutable responses model polling and reloads without sending anything to a live backend.
+async function timelineFixture(page: Page, steps: ActivityStep[] = []) {
+  const model = {
+    messages: [
+      {
+        id: 'ask',
+        author: 'user',
+        authorName: '我',
+        ts: turnIso(0),
+        text: '还有哪些任务要人工介入？',
       },
-    }),
-  );
-  await page.route('**/api/chat?**', (route) => {
-    const isPl = new URL(route.request().url()).searchParams.get('agent') === 'pl';
-    return route.fulfill({
-      json: {
+    ] as Message[],
+    runs: [{ id: 'chat-run', status: 'running', startedAt: turnIso(0) }] as ChatActivityRun[],
+    steps: { 'chat-run': steps } as Record<string, ActivityStep[]>,
+    activityRequests: [] as string[],
+    activityResponseDelayMs: 0,
+    chatRequests: 0,
+    writes: [] as string[],
+  };
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() !== 'GET') {
+      model.writes.push(`${request.method()} ${url.pathname}`);
+      await route.fulfill({ json: { ok: true } });
+      return;
+    }
+    if (url.pathname === '/api/chat-activity') {
+      const id = url.searchParams.get('run') || '';
+      model.activityRequests.push(id);
+      const steps = [...(model.steps[id] || [])];
+      // Intentional server latency is outside the browser clock; notifications must still reach React.
+      if (model.activityResponseDelayMs)
+        await new Promise((resolve) => setTimeout(resolve, model.activityResponseDelayMs));
+      await route.fulfill({ json: { state: steps.length ? 'available' : 'pending', steps } });
+      return;
+    }
+    if (url.pathname === '/api/chat') model.chatRequests += 1;
+    const activeRuns = model.runs.filter((run) => ['running', 'queued'].includes(run.status));
+    const live = {
+      running: activeRuns.filter((run) => run.status === 'running').length,
+      queued: activeRuns.filter((run) => run.status === 'queued').length,
+      taskRunning: 0,
+      backgroundRunning: activeRuns.filter((run) => run.status === 'running').length,
+      runs: activeRuns.map((run) => ({
+        ...run,
+        issueId: 'chat-pl',
+        lastOutputAt: turnIso(37_000),
+        linked: false,
+      })),
+    };
+    const isPl = url.searchParams.get('agent') !== 'qa';
+    const payload: Record<string, unknown> = {
+      '/api/teams': { default: 'c1', teams: [{ id: 'c1', name: 'Hermes Lab' }] },
+      '/api/state': {
+        companyId: 'c1',
+        agents: [{ ...agent('pl', 'PL'), live }, agent('qa', 'QA')],
+        liveRunning: live.running,
+        liveQueued: live.queued,
+        liveTaskRunning: 0,
+        liveBackgroundRunning: live.backgroundRunning,
+      },
+      '/api/chat': {
         state: 'available',
         chat: { id: isPl ? 'chat-pl' : 'chat-qa' },
-        messages: [
-          {
-            id: 'ask',
-            author: 'user',
-            authorName: '我',
-            ts: waitingSince,
-            text: '还有哪些任务要人工介入？',
-          },
-        ],
+        messages: isPl ? model.messages : model.messages.slice(0, 1),
+        activityRuns: isPl ? model.runs : [],
       },
-    });
+      '/api/tasks': { state: 'available', tasks: [], note: '' },
+      '/api/ops': {
+        tasks: { total: 0, stale: [], awaiting: [] },
+        blocked: { count: 0, onBoard: 0, over24h: 0, items: [] },
+        runs: { recent: { hours: 24, failed: 0, timedOut: 0 } },
+        alerts: [],
+        preflight: [],
+      },
+    };
+    await route.fulfill({ json: payload[url.pathname] || {} });
   });
+  return model;
+}
 
-  await page.route('**/api/chat-activity?**', (route) =>
-    route.fulfill({
-      json: {
-        state: 'available',
-        steps: [
-          { id: 's1', kind: 'thinking', text: '先核对看板上的未闭环任务' },
-          { id: 's2', kind: 'tool_call', name: 'terminal', text: 'gh issue list --state open' },
-          { id: 's3', kind: 'tool_result', name: 'terminal', text: '25 条未闭环' },
-        ],
-      },
-    }),
-  );
+const bottomGap = (page: Page) =>
+  page
+    .locator('.chat-stream')
+    .evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
 
+test('shows chat turn state instead of a silent gap while the member works', async ({ page }) => {
+  const model = await timelineFixture(page, [
+    { id: 's1', kind: 'thinking', ts: turnIso(1000), text: '先核对看板上的未闭环任务' },
+    {
+      id: 's2',
+      kind: 'tool_call',
+      ts: turnIso(2000),
+      toolCallId: 'list-issues',
+      name: 'terminal',
+      text: 'gh issue list --state open',
+    },
+    {
+      id: 's3',
+      kind: 'tool_result',
+      ts: turnIso(3000),
+      toolCallId: 'list-issues',
+      name: 'terminal',
+      text: '25 条未闭环',
+    },
+  ]);
   await page.goto('/');
-  const status = page.getByRole('status');
+  const status = page.locator('.chat-inner').getByRole('status');
   await expect(status).toContainText('PL 正在处理…');
   await expect(status).toContainText('前有输出');
-  const activity = page.getByRole('group', { name: '对话过程' });
-  await expect(activity).toContainText('思考 1 次 · 执行 1 条命令');
-  await expect(activity).toContainText('gh issue list --state open');
-  await expect(activity).not.toContainText('先核对看板上的未闭环任务');
-  await page.getByRole('button', { name: '展开过程' }).click();
-  await expect(activity).toContainText('思考过程');
-  await expect(activity).toContainText('先核对看板上的未闭环任务');
-  await expect(activity).toContainText('25 条未闭环');
+  const thinking = page.locator('details.chat-event.thinking');
+  const tool = page.locator('details.chat-event.tool');
+  await expect(thinking.locator(thinkingSummary)).toBeVisible();
+  await expect(tool.locator(toolSummary('terminal'))).toBeVisible();
+  await expect(
+    thinking.locator('.chat-event-detail').getByText('先核对看板上的未闭环任务', { exact: true }),
+  ).not.toBeVisible();
+  await thinking.locator(thinkingSummary).click();
+  await tool.locator(toolSummary('terminal')).click();
+  await expect(thinking).toHaveJSProperty('open', true);
+  await expect(tool).toHaveJSProperty('open', true);
+  await expect(
+    thinking.locator('.chat-event-detail').getByText('先核对看板上的未闭环任务', { exact: true }),
+  ).toBeVisible();
+  await expect(tool).toContainText('gh issue list --state open');
+  await expect(tool.getByText('25 条未闭环', { exact: true })).toBeVisible();
+  await expect(page.locator('.chat-flow')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '展开过程' })).toHaveCount(0);
+  expect(
+    await status.evaluate((element) => element === element.parentElement?.lastElementChild),
+  ).toBe(true);
 
-  // 没有运行接管时要如实说"已送达，等待"，而不是重复"正在处理"
+  // 没有运行接管时要如实说“已送达，等待”，而不是重复“正在处理”。
   await page.getByRole('button', { name: /^QA ·/ }).click();
   await expect(status).toContainText('已送达，等待 QA 处理…');
-  await expect(activity).toHaveCount(0);
+  await expect(page.locator('details.chat-event')).toHaveCount(0);
+  expect(model.writes).toEqual([]);
 });
+
+test('interleaves thinking, assistant messages and exactly paired parallel tools by timestamp', async ({
+  page,
+}) => {
+  const firstReply = '**先说明进展**\n\n- 正在检查两个并行命令';
+  const finalReply = '**检查结束**，接下来请人工验收。';
+  const model = await timelineFixture(page, [
+    // Intentionally unordered: neither response order nor tool name identifies a call/result pair.
+    { id: 'reply-final', kind: 'assistant', ts: turnIso(9000), text: finalReply },
+    {
+      id: 'result-b',
+      kind: 'tool_result',
+      toolCallId: 'call-b',
+      name: 'terminal',
+      ts: turnIso(6500),
+      text: 'B 独有结果\n第二行 B',
+    },
+    { id: 'thought', kind: 'thinking', ts: turnIso(1000), text: '先检查上下文\n再并行执行' },
+    {
+      id: 'call-a',
+      kind: 'tool_call',
+      toolCallId: 'call-a',
+      name: 'terminal',
+      ts: turnIso(3000),
+      text: 'printf "command-A"',
+    },
+    {
+      id: 'orphan',
+      kind: 'tool_result',
+      toolCallId: 'missing-call',
+      name: 'terminal',
+      ts: turnIso(8000),
+      text: '没有调用记录的独立结果',
+    },
+    { id: 'reply-first', kind: 'assistant', ts: turnIso(2000), text: firstReply },
+    {
+      id: 'call-b',
+      kind: 'tool_call',
+      toolCallId: 'call-b',
+      name: 'terminal',
+      ts: turnIso(4000),
+      text: 'printf "command-B"',
+    },
+    {
+      id: 'search',
+      kind: 'tool_call',
+      toolCallId: 'search-call',
+      name: 'web_search',
+      ts: turnIso(5000),
+      text: '查询最新验收说明',
+    },
+    {
+      id: 'search-result',
+      kind: 'tool_result',
+      toolCallId: 'search-call',
+      name: 'web_search',
+      ts: turnIso(5500),
+      text: '搜索命中：验收清单',
+    },
+    {
+      id: 'result-a',
+      kind: 'tool_result',
+      toolCallId: 'call-a',
+      name: 'terminal',
+      ts: turnIso(7000),
+      text: 'A 独有结果\n第二行 A',
+    },
+  ]);
+  model.messages.push({
+    id: 'persisted-middle',
+    author: 'agent',
+    authorName: 'PL',
+    ts: turnIso(2500),
+    text: '已持久化的中途回复',
+  });
+  await page.goto('/');
+  const timeline = page.locator('.chat-inner');
+  const items = timeline.locator(':scope > .chat-message, :scope > .chat-event');
+  await expect(items).toHaveCount(9);
+  await expect(items.nth(0)).toContainText('还有哪些任务要人工介入？');
+  await expect(items.nth(1)).toHaveClass(/chat-event thinking/);
+  await expect(items.nth(2)).toHaveClass(/chat-message agent/);
+  await expect(items.nth(2).locator('.message-bubble strong')).toHaveText('先说明进展');
+  await expect(items.nth(2).locator('.message-bubble li')).toHaveText('正在检查两个并行命令');
+  await expect(items.nth(3)).toContainText('已持久化的中途回复');
+  await expect(items.nth(4)).toContainText('command-A');
+  await expect(items.nth(5)).toContainText('command-B');
+  await expect(items.nth(6).locator(toolSummary('web_search'))).toBeVisible();
+  await expect(items.nth(7)).toHaveClass(/chat-event tool/);
+  await expect(items.nth(8).locator('.message-bubble strong')).toHaveText('检查结束');
+  await expect(timeline.locator('details article.chat-message.agent')).toHaveCount(0);
+  await expect(timeline.locator('article.chat-message.agent')).toHaveCount(3);
+  const callA = items.nth(4);
+  const callB = items.nth(5);
+  await callA.locator(toolSummary('terminal')).click();
+  await callB.locator(toolSummary('terminal')).click();
+  await expect(callA.getByText('A 独有结果\n第二行 A', { exact: true })).toBeVisible();
+  await expect(callA).not.toContainText('B 独有结果');
+  await expect(callB.getByText('B 独有结果\n第二行 B', { exact: true })).toBeVisible();
+  await expect(callB).not.toContainText('A 独有结果');
+  await items.nth(6).locator(toolSummary('web_search')).click();
+  await expect(items.nth(6).getByText('搜索命中：验收清单', { exact: true })).toBeVisible();
+  await items.nth(7).locator(toolSummary('terminal')).click();
+  await expect(items.nth(7).getByText('没有调用记录的独立结果', { exact: true })).toBeVisible();
+});
+
+test('independently expands full multiline thinking and tools and preserves open events through polling', async ({
+  page,
+}) => {
+  const thoughtText = '第一行：核对任务\n第二行：保留完整推理\n\n第四行：独立展开';
+  const command = 'python - <<\'PY\'\nprint("first")\nprint("second")\nPY';
+  const traceback =
+    'Traceback (most recent call last):\n  File "check.py", line 2\nRuntimeError: 完整失败详情';
+  const model = await timelineFixture(page, [
+    { id: 'shared-thought', kind: 'thinking', ts: turnIso(1000), text: thoughtText },
+    {
+      id: 'shared-call',
+      kind: 'tool_call',
+      toolCallId: 'shared-call',
+      name: 'terminal',
+      ts: turnIso(2000),
+      text: command,
+    },
+    {
+      id: 'shared-result',
+      kind: 'tool_result',
+      toolCallId: 'shared-call',
+      name: 'terminal',
+      ts: turnIso(3000),
+      text: 'first\nsecond\n',
+    },
+    {
+      id: 'failed-call',
+      kind: 'tool_call',
+      toolCallId: 'failed-call',
+      name: 'web_search',
+      ts: turnIso(4000),
+      text: '查询失败案例',
+    },
+    {
+      id: 'failed-result',
+      kind: 'tool_result',
+      toolCallId: 'failed-call',
+      name: 'web_search',
+      ts: turnIso(5000),
+      text: traceback,
+      isError: true,
+    },
+  ]);
+  // IDs deliberately collide across runs; expansion must be scoped to the run, not the raw step ID.
+  model.runs.unshift({
+    id: 'older-run',
+    status: 'succeeded',
+    createdAt: turnIso(-10_000),
+    finishedAt: turnIso(-1000),
+  });
+  model.steps['older-run'] = [
+    {
+      id: 'shared-thought',
+      kind: 'thinking',
+      ts: turnIso(-9000),
+      text: '上一回合的思考\n保持折叠',
+    },
+    {
+      id: 'shared-call',
+      kind: 'tool_call',
+      toolCallId: 'shared-call',
+      name: 'terminal',
+      ts: turnIso(-8000),
+      text: 'echo previous-turn',
+    },
+    {
+      id: 'shared-result',
+      kind: 'tool_result',
+      toolCallId: 'shared-call',
+      name: 'terminal',
+      ts: turnIso(-7000),
+      text: '上一回合独有结果',
+    },
+  ];
+  await page.goto('/');
+  const thoughts = page.locator('details.chat-event.thinking');
+  const tools = page.locator('details.chat-event.tool');
+  await expect(thoughts).toHaveCount(2);
+  await expect(tools).toHaveCount(3);
+  const thought = thoughts.nth(1);
+  const tool = tools.nth(1);
+  const failure = tools.nth(2);
+  const eventIds = await page
+    .locator('details.chat-event')
+    .evaluateAll((elements) => elements.map((element) => element.getAttribute('data-event-id')));
+  expect(eventIds.every(Boolean)).toBe(true);
+  expect(new Set(eventIds).size).toBe(eventIds.length);
+  const thoughtId = await thought.getAttribute('data-event-id');
+  const toolId = await tool.getAttribute('data-event-id');
+  expect(thoughtId).toContain('chat-run');
+  expect(toolId).toContain('chat-run');
+  await expect(failure.locator(toolSummary('web_search'))).toContainText('执行失败');
+  await expect(failure.locator('summary')).not.toContainText('Traceback');
+  await expect(failure.getByText(traceback, { exact: true })).not.toBeVisible();
+  await thought.locator(thinkingSummary).click();
+  const thinkingParagraphs = thought.locator('.chat-event-detail p');
+  await expect(thinkingParagraphs).toHaveText(thoughtText.split('\n\n'));
+  await expect(thinkingParagraphs.first()).toBeVisible();
+  expect(await thinkingParagraphs.first().textContent()).toBe(thoughtText.split('\n\n')[0]);
+  await expect(tool).toHaveJSProperty('open', false);
+  await tool.locator(toolSummary('terminal')).click();
+  await expect(
+    tool.locator('.chat-event-detail').getByText(command, { exact: true }),
+  ).toBeVisible();
+  expect(
+    await tool.locator('.chat-event-detail').getByText(command, { exact: true }).textContent(),
+  ).toBe(command);
+  expect(await tool.getByText('first\nsecond\n', { exact: true }).textContent()).toBe(
+    'first\nsecond\n',
+  );
+  await expect(thought).toHaveJSProperty('open', true);
+  await expect(thoughts.nth(0)).toHaveJSProperty('open', false);
+  await expect(tools.nth(0)).toHaveJSProperty('open', false);
+  await expect(tool).not.toContainText('上一回合独有结果');
+
+  model.activityResponseDelayMs = 250;
+  const activeRequests = model.activityRequests.filter((id) => id === 'chat-run').length;
+  expect(activeRequests).toBeGreaterThanOrEqual(1);
+  expect(model.activityRequests.filter((id) => id === 'older-run')).toHaveLength(1);
+  model.steps['chat-run'].push({
+    id: 'next-thought',
+    kind: 'thinking',
+    ts: turnIso(6000),
+    text: '轮询新到的思考',
+  });
+  // Keep real timers running: fetch/json completion can schedule React Query's setTimeout(0)
+  // notification after any fixed virtual-time slice has ended.
+  await expect(thoughts).toHaveCount(3, { timeout: 10_000 });
+  await expect(thought).toHaveAttribute('data-event-id', thoughtId!);
+  await expect(tool).toHaveAttribute('data-event-id', toolId!);
+  expect(model.activityRequests.filter((id) => id === 'chat-run').length).toBeGreaterThan(
+    activeRequests,
+  );
+  expect(model.activityRequests.filter((id) => id === 'older-run')).toHaveLength(1);
+  await expect(thought).toHaveJSProperty('open', true);
+  await expect(tool).toHaveJSProperty('open', true);
+  await expect(thoughts.nth(0)).toHaveJSProperty('open', false);
+  await expect(thoughts.nth(2)).toHaveJSProperty('open', false);
+  await expect(failure).toHaveJSProperty('open', false);
+  await failure.locator(toolSummary('web_search')).click();
+  await expect(failure.getByText(traceback, { exact: true })).toBeVisible();
+  expect(await failure.getByText(traceback, { exact: true }).textContent()).toBe(traceback);
+  await thought.locator(thinkingSummary).click();
+  await expect(thought).toHaveJSProperty('open', false);
+  await expect(tool).toHaveJSProperty('open', true);
+  await expect(failure).toHaveJSProperty('open', true);
+});
+
+test('retains completed activity after reload without duplicating the posted final comment', async ({
+  page,
+}) => {
+  const finalText = '**最终答复**\n\n检查完成，请人工验收。';
+  const model = await timelineFixture(page, [
+    {
+      id: 'completed-thought',
+      kind: 'thinking',
+      ts: turnIso(1000),
+      text: '完成前的完整思考\n下一行仍保留',
+    },
+    {
+      id: 'completed-call',
+      kind: 'tool_call',
+      toolCallId: 'completed-call',
+      name: 'terminal',
+      ts: turnIso(2000),
+      text: 'echo verified',
+    },
+    {
+      id: 'completed-result',
+      kind: 'tool_result',
+      toolCallId: 'completed-call',
+      name: 'terminal',
+      ts: turnIso(3000),
+      text: 'verified',
+    },
+    { id: 'completed-reply', kind: 'assistant', ts: turnIso(4000), text: finalText },
+  ]);
+  // Identical prose from an earlier turn is legitimate history, not a global-text duplicate.
+  model.messages.unshift({
+    id: 'old-final',
+    author: 'agent',
+    authorName: 'PL',
+    ts: turnIso(-60_000),
+    text: finalText,
+  });
+  await page.goto('/');
+  const finalBubbles = page
+    .locator('article.chat-message.agent .message-bubble')
+    .filter({ hasText: '最终答复' });
+  await expect(finalBubbles).toHaveCount(2);
+  await expect(page.locator('details.chat-event')).toHaveCount(2);
+  model.runs[0] = { ...model.runs[0], status: 'succeeded', finishedAt: turnIso(5000) };
+  model.messages.push({
+    id: 'posted-final',
+    author: 'agent',
+    authorName: 'PL',
+    ts: turnIso(6000),
+    text: finalText,
+  });
+  await expect(page.locator('.chat-inner').getByRole('status')).toHaveCount(0, {
+    timeout: 10_000,
+  });
+  await expect(finalBubbles).toHaveCount(2);
+  await expect(page.locator('details.chat-event')).toHaveCount(2);
+
+  model.activityRequests.length = 0;
+  await page.reload();
+  await expect(finalBubbles).toHaveCount(2);
+  await expect(page.locator('details.chat-event')).toHaveCount(2);
+  expect(model.activityRequests).toEqual(['chat-run']);
+  await page.locator('details.chat-event.thinking').locator(thinkingSummary).click();
+  await expect(
+    page.locator('.thinking-detail').getByText('完成前的完整思考\n下一行仍保留', { exact: true }),
+  ).toBeVisible();
+  await page.locator('details.chat-event.tool').locator(toolSummary('terminal')).click();
+  await expect(
+    page.locator('details.chat-event.tool').getByText('verified', { exact: true }),
+  ).toBeVisible();
+  // Observe two subsequent real chat polls with timers still running.
+  // Completed activity must stay at its one reload read throughout this observation window.
+  const chatRequests = model.chatRequests;
+  await expect
+    .poll(() => model.chatRequests, { timeout: 12_000 })
+    .toBeGreaterThanOrEqual(chatRequests + 2);
+  expect(model.activityRequests).toEqual(['chat-run']);
+  await expect(finalBubbles).toHaveCount(2);
+  expect(model.writes).toEqual([]);
+});
+
+test('shows the initial empty activity hint only inside the bottom status', async ({ page }) => {
+  const model = await timelineFixture(page);
+  await page.goto('/');
+  const status = page.locator('.chat-inner').getByRole('status');
+  await expect(status).toContainText('PL 正在处理…');
+  await expect(status).toContainText('等待模型的第一个输出');
+  await expect(page.getByText('等待模型的第一个输出', { exact: true })).toHaveCount(1);
+  await expect(page.locator('details.chat-event, .chat-flow')).toHaveCount(0);
+  expect(
+    await status.evaluate((element) => element === element.parentElement?.lastElementChild),
+  ).toBe(true);
+  expect(model.writes).toEqual([]);
+});
+
+test('activity polling follows the bottom only while the reader remains sticky', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 760 });
+  const model = await timelineFixture(page, [
+    { id: 'scroll-thought', kind: 'thinking', ts: turnIso(1000), text: '准备继续输出' },
+  ]);
+  model.messages.unshift(
+    ...Array.from({ length: 30 }, (_, index): Message => ({
+      id: `history-${index}`,
+      author: 'agent',
+      authorName: 'PL',
+      ts: turnIso(-60_000 + index * 1000),
+      text: `历史消息 ${index}\n\n${'这是供读者回看的一段旧对话。'.repeat(12)}`,
+    })),
+  );
+  await page.goto('/');
+  const stream = page.locator('.chat-stream');
+  await expect(page.locator('details.chat-event.thinking')).toHaveCount(1);
+  await expect.poll(() => bottomGap(page)).toBeLessThan(4);
+  model.activityResponseDelayMs = 250;
+  const initialHeight = await stream.evaluate((element) => element.scrollHeight);
+  model.steps['chat-run'].push({
+    id: 'sticky-reply',
+    kind: 'assistant',
+    ts: turnIso(2000),
+    text: `贴底时新增回复\n\n${'新输出应自动跟随。\n\n'.repeat(12)}`,
+  });
+  const stickyRequests = model.activityRequests.length;
+  await expect(
+    page.locator('article.chat-message.agent').filter({ hasText: '贴底时新增回复' }),
+  ).toHaveCount(1, { timeout: 10_000 });
+  expect(model.activityRequests.length).toBeGreaterThan(stickyRequests);
+  expect(await stream.evaluate((element) => element.scrollHeight)).toBeGreaterThan(
+    initialHeight + 100,
+  );
+  await expect.poll(() => bottomGap(page)).toBeLessThan(4);
+
+  await stream.evaluate((element) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll', { bubbles: true }));
+  });
+  await expect(page.getByRole('button', { name: '回到最新消息' })).toBeVisible();
+  const readingTop = await stream.evaluate((element) => element.scrollTop);
+  model.steps['chat-run'].push({
+    id: 'nonsticky-reply',
+    kind: 'assistant',
+    ts: turnIso(3000),
+    text: `回看时新增回复\n\n${'不要把读者强制拉回底部。\n\n'.repeat(12)}`,
+  });
+  const nonstickyRequests = model.activityRequests.length;
+  const newReply = page.locator('article.chat-message.agent').filter({ hasText: '回看时新增回复' });
+  await expect(newReply).toHaveCount(1, { timeout: 10_000 });
+  expect(model.activityRequests.length).toBeGreaterThan(nonstickyRequests);
+  await expect(newReply).not.toBeInViewport();
+  expect(await stream.evaluate((element) => element.scrollTop)).toBeCloseTo(readingTop, 0);
+  await expect(page.getByRole('button', { name: '回到最新消息' })).toBeVisible();
+  await page.getByRole('button', { name: '回到最新消息' }).click();
+  await expect.poll(() => bottomGap(page)).toBeLessThan(4);
+  expect(model.writes).toEqual([]);
+});
+
+for (const width of [1440, 390]) {
+  test(`long expanded activity has no horizontal overflow at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const longToken = 'very_long_unbroken_command_argument_'.repeat(100);
+    const thoughtText = `第一行完整思考\n${longToken}\n最后一行完整思考`;
+    const command = `terminal --payload=${longToken}\n  --second-line=保留多行`;
+    const result = `完整输出第一行\n${longToken}\n完整输出最后一行`;
+    const model = await timelineFixture(page, [
+      { id: 'long-thought', kind: 'thinking', ts: turnIso(1000), text: thoughtText },
+      {
+        id: 'long-call',
+        kind: 'tool_call',
+        toolCallId: 'long-call',
+        name: 'terminal',
+        ts: turnIso(2000),
+        text: command,
+      },
+      {
+        id: 'long-result',
+        kind: 'tool_result',
+        toolCallId: 'long-call',
+        name: 'terminal',
+        ts: turnIso(3000),
+        text: result,
+      },
+    ]);
+    await page.goto('/');
+    const assertNoOverflow = async () => {
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      for (const detail of await page.locator('details.chat-event').all()) {
+        const bounds = await detail.boundingBox();
+        expect(bounds!.x).toBeGreaterThanOrEqual(0);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1);
+      }
+    };
+    await expect(page.locator('details.chat-event')).toHaveCount(2);
+    await assertNoOverflow();
+    const thinking = page.locator('details.chat-event.thinking');
+    const tool = page.locator('details.chat-event.tool');
+    await thinking.locator(thinkingSummary).click();
+    await tool.locator(toolSummary('terminal')).click();
+    await expect(
+      thinking.locator('.chat-event-detail').getByText(thoughtText, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      tool.locator('.chat-event-detail').getByText(command, { exact: true }),
+    ).toBeVisible();
+    await expect(tool.getByText(result, { exact: true })).toBeVisible();
+    expect(
+      await tool.locator('.chat-event-detail').getByText(command, { exact: true }).textContent(),
+    ).toBe(command);
+    expect(await tool.getByText(result, { exact: true }).textContent()).toBe(result);
+    await assertNoOverflow();
+    const screenshot = testInfo.outputPath(`activity-expanded-${width}.png`);
+    await page.screenshot({ path: screenshot, animations: 'disabled' });
+    await testInfo.attach(`activity-expanded-${width}`, {
+      path: screenshot,
+      contentType: 'image/png',
+    });
+    expect(model.writes).toEqual([]);
+  });
+}
