@@ -9,6 +9,7 @@ import { Markdown } from '../../components/Markdown';
 import { MemberAvatar } from '../../components/MemberAvatar';
 import { clockLabel, dayLabel } from '../../lib/format';
 import { chatRun, replyLabel, replyState } from '../../lib/chatReply';
+import { ChatActivity } from './ChatActivity';
 
 interface Props {
   company: string;
@@ -158,6 +159,9 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
                 <span className="chat-reply-dot" aria-hidden="true" />
                 <span>{replyLabel(reply, agent.name)}</span>
               </div>
+            )}
+            {run?.status === 'running' && (
+              <ChatActivity company={company} agentId={agent.id} runId={run.id} />
             )}
           </div>
         </div>

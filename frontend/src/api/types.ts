@@ -56,6 +56,20 @@ export interface Message {
   text: string;
   truncated?: boolean;
 }
+export interface ActivityStep {
+  id: string;
+  kind: 'thinking' | 'assistant' | 'tool_call' | 'tool_result';
+  ts?: string;
+  text: string;
+  truncated?: boolean;
+  name?: string;
+  isError?: boolean;
+}
+export interface ChatActivityResponse {
+  state: 'available' | 'pending' | 'unavailable';
+  steps: ActivityStep[];
+  note?: string;
+}
 export interface ChatResponse {
   state: 'available' | 'new' | 'disabled' | 'unavailable';
   messages: Message[];

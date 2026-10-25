@@ -1004,12 +1004,31 @@ test('shows chat turn state instead of a silent gap while the member works', asy
     });
   });
 
+  await page.route('**/api/chat-activity?**', (route) =>
+    route.fulfill({
+      json: {
+        state: 'available',
+        steps: [
+          { id: 's1', kind: 'thinking', text: '先核对看板上的未闭环任务' },
+          { id: 's2', kind: 'tool_call', name: 'terminal', text: 'gh issue list --state open' },
+          { id: 's3', kind: 'tool_result', name: 'terminal', text: '25 条未闭环' },
+        ],
+      },
+    }),
+  );
+
   await page.goto('/');
   const status = page.getByRole('status');
   await expect(status).toContainText('PL 正在处理…');
   await expect(status).toContainText('前有输出');
+  const activity = page.getByRole('group', { name: '对话过程' });
+  await expect(activity).toContainText('先核对看板上的未闭环任务');
+  await expect(activity).toContainText('gh issue list --state open');
+  await page.getByRole('button', { name: '展开 3 步' }).click();
+  await expect(activity).toContainText('25 条未闭环');
 
   // 没有运行接管时要如实说"已送达，等待"，而不是重复"正在处理"
   await page.getByRole('button', { name: /^QA ·/ }).click();
   await expect(status).toContainText('已送达，等待 QA 处理…');
+  await expect(activity).toHaveCount(0);
 });
