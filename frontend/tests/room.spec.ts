@@ -178,6 +178,18 @@ async function fixture(page: Page) {
         alerts: [],
         preflight: [],
       },
+      '/api/issue-gate': {
+        state: 'available',
+        issue: {
+          id: 'one',
+          identifier: 'HER-1',
+          title: task.title,
+          status: task.status,
+          owner: 'PL',
+        },
+        blocked: null,
+        interactions: [],
+      },
     };
     await route.fulfill({ json: response[url.pathname] || {} });
   });
@@ -948,6 +960,157 @@ test('interactive task-context banner and ops modal navigation to task detail an
   await page.locator('.ops-row-button', { hasText: 'QA' }).click();
   await expect(page.getByRole('heading', { name: 'QA', exact: true })).toBeVisible();
   await expect(page.getByText('成员属性 · QA')).toBeVisible();
+});
+
+test('ops issues open an actionable gate panel for answering and unblocking', async ({ page }) => {
+  const writes = await fixture(page);
+  await page.route('**/api/ops?**', (route) =>
+    route.fulfill({
+      json: {
+        tasks: {
+          total: 2,
+          stale: [],
+          awaiting: [
+            {
+              id: 'one',
+              identifier: 'HER-1',
+              title: '并行任务',
+              owner: 'PL',
+              idleMinutes: 30,
+              prompt: '走哪条发布通道？',
+            },
+          ],
+        },
+        blocked: {
+          count: 1,
+          onBoard: 1,
+          over24h: 0,
+          items: [
+            {
+              id: 'one',
+              identifier: 'HER-1',
+              title: '并行任务',
+              owner: 'PL',
+              waitingOn: '用户',
+              action: '授权合入 PR #1',
+              ageHours: 2,
+              silentHours: 1,
+              onBoard: true,
+            },
+          ],
+        },
+        runs: { recent: { hours: 24, failed: 0, timedOut: 0 } },
+        alerts: [
+          { code: 'board_gate', level: 'warn', message: '1 个任务在等你授权或拍板，最长静默 1.0h' },
+          { code: 'awaiting_answer', level: 'warn', message: '1 个任务在等你回答问题' },
+        ],
+        preflight: [],
+      },
+    }),
+  );
+  await page.route('**/api/issue-gate?**', async (route) => {
+    // Writes must fall through to the fixture's recorder handler.
+    if (route.request().method() !== 'GET') {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      json: {
+        state: 'available',
+        issue: {
+          id: 'one',
+          identifier: 'HER-1',
+          title: '并行任务',
+          status: 'blocked',
+          owner: 'PL',
+        },
+        blocked: {
+          waitingOn: '用户',
+          action: '授权合入 PR #1',
+          ageHours: 2.5,
+          silentHours: 1.2,
+          onBoard: true,
+        },
+        interactions: [
+          {
+            id: 'i-questions',
+            kind: 'ask_user_questions',
+            status: 'pending',
+            title: '上线方式',
+            summary: '需要你选择发布通道',
+            createdAt: iso(-600000),
+            submitLabel: '提交选择',
+            questions: [
+              {
+                id: 'channel',
+                prompt: '走哪条发布通道？',
+                helpText: '灰度会先放 10% 流量',
+                selectionMode: 'single',
+                required: true,
+                options: [
+                  { id: 'canary', label: '灰度发布', description: '10% 流量' },
+                  { id: 'full', label: '全量发布' },
+                  { id: 'custom', label: '我来描述', freeText: true },
+                ],
+              },
+              {
+                id: 'notify',
+                prompt: '要通知谁？',
+                selectionMode: 'multi',
+                options: [{ id: 'qa', label: 'QA' }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+  await page.getByRole('button', { name: '刷新', exact: true }).click();
+
+  await page.getByRole('button', { name: '巡检 2 项' }).click();
+  await expect(page.getByRole('dialog', { name: '团队巡检' })).toBeVisible();
+  await expect(page.getByText('在详情顶部填写回复即可继续')).toBeVisible();
+  await expect(page.getByText('在详情顶部选择答案并提交')).toBeVisible();
+
+  // Clicking the issue row opens the task detail with the actionable gate panel on top
+  await page.locator('.ops-row-button', { hasText: 'HER-1' }).first().click();
+  await expect(page.getByRole('dialog', { name: '团队巡检' })).toHaveCount(0);
+  await expect(page.locator('.detail-title')).toContainText('HER-1');
+  await expect(page.locator('.gate-panel')).toBeVisible();
+  await expect(page.locator('.gate-chip.warn', { hasText: '等你处理' })).toBeVisible();
+  await expect(page.locator('.gate-chip.warn', { hasText: '等你回答' })).toBeVisible();
+  await expect(page.getByText('需要你：授权合入 PR #1')).toBeVisible();
+  await expect(page.getByText('灰度会先放 10% 流量')).toBeVisible();
+
+  // Required question blocks submission until an option is chosen
+  await expect(page.getByRole('button', { name: '提交选择' })).toBeDisabled();
+  await page.getByRole('button', { name: /灰度发布/ }).click();
+  await expect(page.getByRole('button', { name: '提交选择' })).toBeEnabled();
+  await page.getByRole('button', { name: '提交选择' }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0]).toMatchObject({
+    path: '/api/issue-gate',
+    company: 'c1',
+    body: {
+      issueId: 'one',
+      action: 'respond',
+      interactionId: 'i-questions',
+      answers: [
+        { questionId: 'channel', optionIds: ['canary'] },
+        { questionId: 'notify', optionIds: [] },
+      ],
+    },
+  });
+
+  // The blocked card replies into the task thread and asks Paperclip to reopen it
+  await page.getByRole('textbox', { name: '任务回复' }).fill('已授权，继续合入');
+  await page.getByRole('button', { name: '回复并恢复任务' }).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1]).toMatchObject({
+    path: '/api/issue-gate',
+    company: 'c1',
+    body: { issueId: 'one', action: 'reply', text: '已授权，继续合入', reopen: true },
+  });
 });
 
 const turnStart = Date.now() - 45_000;

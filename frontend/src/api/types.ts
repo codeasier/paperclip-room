@@ -189,6 +189,61 @@ export interface OpsResponse {
   preflight: { agent: string; detail: string }[];
   alerts: { code: string; level: string; message: string }[];
 }
+export interface GateQuestionOption {
+  id: string;
+  label: string;
+  description?: string | null;
+  freeText?: boolean;
+}
+export interface GateQuestion {
+  id: string;
+  prompt: string;
+  helpText?: string | null;
+  selectionMode: 'single' | 'multi';
+  required?: boolean;
+  allowOther?: boolean;
+  options: GateQuestionOption[];
+}
+export interface GateConfirmation {
+  prompt?: string | null;
+  detailsMarkdown?: string | null;
+  acceptLabel?: string | null;
+  rejectLabel?: string | null;
+  rejectRequiresReason?: boolean;
+  options: { id: string; label: string; description?: string | null }[];
+}
+export interface GateInteraction {
+  id: string;
+  kind: string;
+  status: string;
+  title?: string | null;
+  summary?: string | null;
+  submitLabel?: string | null;
+  createdAt?: string | null;
+  questions?: GateQuestion[];
+  confirmation?: GateConfirmation;
+}
+export interface GateBlocked {
+  waitingOn?: string;
+  action?: string;
+  ageHours?: number | null;
+  silentHours?: number | null;
+  onBoard?: boolean;
+}
+export interface GateIssue {
+  id: string;
+  identifier: string;
+  title: string;
+  status: string;
+  owner?: string;
+}
+export interface GateResponse {
+  state: 'available' | 'unavailable';
+  issue?: GateIssue;
+  blocked?: GateBlocked | null;
+  interactions: GateInteraction[];
+  note?: string;
+}
 export interface WriteResponse {
   ok: boolean;
   error?: string;

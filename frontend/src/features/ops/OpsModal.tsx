@@ -19,12 +19,13 @@ export function OpsModal({
   const query = useRoomQuery<OpsResponse>('/api/ops', company, undefined, 30000);
   const data = query.data;
   const empty = <div className="ops-empty">无</div>;
-  function issues(title: string, items: OpsIssue[]) {
+  function issues(title: string, items: OpsIssue[], hint?: string) {
     return (
       <section className="ops-section">
         <h4>
           {title}（{items.length}）
         </h4>
+        {hint && items.length ? <div className="ops-section-hint">{hint}</div> : null}
         <div className="ops-list">
           {items.length
             ? items.map((item, index) => (
@@ -94,8 +95,13 @@ export function OpsModal({
           {issues(
             '等你处理',
             data.blocked.items.filter((item) => item.onBoard),
+            '点开任一任务，在详情顶部填写回复即可继续；「回复并恢复任务」会同时请求解除阻塞。',
           )}
-          {issues('等你回答', data.tasks.awaiting)}
+          {issues(
+            '等你回答',
+            data.tasks.awaiting,
+            '点开任一任务，在详情顶部选择答案并提交，成员会收到你的回答。',
+          )}
           {issues(
             '其他阻塞',
             data.blocked.items.filter((item) => !item.onBoard),

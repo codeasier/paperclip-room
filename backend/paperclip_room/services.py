@@ -1840,6 +1840,7 @@ def ops_payload(company):
         if latest.get("status") == "pending":
             stale.remove(item)
             awaiting.append({
+                "id": item["id"],
                 "identifier": item["identifier"],
                 "title": item["title"],
                 "owner": item["owner"],
@@ -1863,6 +1864,7 @@ def ops_payload(company):
         owner = descriptor.get("owner")
         last = _epoch(issue.get("lastActivityAt"))
         blocked.append({
+            "id": issue.get("id"),
             "identifier": issue.get("identifier"),
             "title": issue.get("title"),
             "owner": names.get(issue.get("assigneeAgentId")) or "未指派",
@@ -1949,3 +1951,252 @@ def ops_payload(company):
         "preflight": preflight[:20],
         "alerts": alerts,
     }
+
+
+# ---------------------------------------------------------------- 巡检处理入口（issue-gate）
+
+# 巡检只指出"等你处理/等你回答"，issue-gate 负责把详情页变成可操作的：
+# 阻塞任务给回复入口（可选 reopen），pending 交互给答题/确认入口。写操作全部
+# 代理给 Paperclip 原生接口，控制台不自己改状态。
+
+UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+GATE_ANSWER_LIMIT = 20
+GATE_CONFIRMATION_KINDS = ("request_confirmation", "request_checkbox_confirmation")
+
+
+def _upstream_error(prefix, status, data):
+    detail = ""
+    if isinstance(data, dict):
+        detail = str(data.get("error") or data.get("message") or
+                     json.dumps(data, ensure_ascii=False))
+    detail = detail[:240]
+    return f"{prefix} HTTP {status}: {detail}" if detail else f"{prefix} HTTP {status}。"
+
+
+def _gate_find_issue(company, issue_ref):
+    """在当前团队的任务窗口内按 UUID 或编号解析任务；天然限定团队范围。
+
+    与巡检共用同一份 5000 条任务缓存：详情每 8 秒轮询，不能每次都全量拉任务。
+    """
+    issues = cached("ops:issues:" + company, 20.0, lambda: fetch_all_issues(company))
+    for issue in issues:
+        if issue.get("id") == issue_ref or issue.get("identifier") == issue_ref:
+            return issue
+    return None
+
+
+def _gate_blocked_view(issue, names):
+    if issue.get("status") != "blocked":
+        return None
+    descriptor = issue.get("unblockDescriptor") or {}
+    attention = issue.get("blockerAttention") or {}
+    owner = descriptor.get("owner")
+    now = time.time()
+    since = _epoch(issue.get("blockedTransitionAt")) or _epoch(issue.get("updatedAt"))
+    last = _epoch(issue.get("lastActivityAt"))
+    return {
+        "waitingOn": _owner_label(owner, names),
+        "action": descriptor.get("action") or "",
+        "ageHours": round((now - since) / 3600, 1) if since else None,
+        "silentHours": round((now - last) / 3600, 1) if last else None,
+        "attention": attention.get("state"),
+        "reason": attention.get("reason"),
+        "onBoard": owner == "board" or (isinstance(owner, dict) and bool(owner.get("userId"))),
+    }
+
+
+def _gate_question_view(question):
+    return {
+        "id": question.get("id"),
+        "prompt": question.get("prompt") or "",
+        "helpText": question.get("helpText"),
+        "selectionMode": question.get("selectionMode") if question.get("selectionMode") in ("single", "multi") else "single",
+        "required": bool(question.get("required")),
+        "allowOther": bool(question.get("allowOther")),
+        "options": [{
+            "id": option.get("id"),
+            "label": option.get("label") or option.get("id"),
+            "description": option.get("description"),
+            "freeText": bool(option.get("freeText")),
+        } for option in (question.get("options") or [])
+            if isinstance(option, dict) and option.get("id")],
+    }
+
+
+def _gate_interaction_view(interaction):
+    """pending 交互压成 UI 能直接渲染的问题/确认卡；其余状态不进详情。"""
+    if not isinstance(interaction, dict) or interaction.get("status") != "pending":
+        return None
+    kind = interaction.get("kind")
+    payload = interaction.get("payload") or {}
+    view = {
+        "id": interaction.get("id"),
+        "kind": kind,
+        "status": "pending",
+        "title": interaction.get("title"),
+        "summary": interaction.get("summary"),
+        "createdAt": interaction.get("createdAt"),
+    }
+    if kind == "ask_user_questions":
+        view["submitLabel"] = payload.get("submitLabel")
+        view["questions"] = [_gate_question_view(question)
+                             for question in (payload.get("questions") or [])
+                             if isinstance(question, dict)]
+    elif kind in GATE_CONFIRMATION_KINDS:
+        view["confirmation"] = {
+            "prompt": payload.get("prompt"),
+            "detailsMarkdown": payload.get("detailsMarkdown"),
+            "acceptLabel": payload.get("acceptLabel"),
+            "rejectLabel": payload.get("rejectLabel"),
+            "rejectRequiresReason": bool(payload.get("rejectRequiresReason")),
+            "options": [{
+                "id": option.get("id"),
+                "label": option.get("label") or option.get("id"),
+                "description": option.get("description"),
+            } for option in (payload.get("options") or [])
+                if isinstance(option, dict) and option.get("id")],
+        }
+    return view
+
+
+def issue_gate(company, issue_ref):
+    """任务处理入口：阻塞描述 + pending 交互。只读，不修改任何状态。"""
+    names = {a.get("id"): a.get("name") for a in agents_for(company)}
+    issue = _gate_find_issue(company, issue_ref)
+    if not issue:
+        return {"state": "unavailable", "interactions": [],
+                "note": "未在当前团队任务窗口内找到该任务。"}
+    issue_id = issue.get("id")
+    interactions = cached("ops:interactions:" + issue_id, 20.0,
+                          lambda: fetch_issue_interactions(issue_id))
+    views = [view for view in (_gate_interaction_view(item) for item in interactions) if view]
+    return {
+        "state": "available",
+        "issue": {
+            "id": issue_id,
+            "identifier": issue.get("identifier"),
+            "title": issue.get("title") or "",
+            "status": issue.get("status"),
+            "owner": names.get(issue.get("assigneeAgentId")) or "未指派",
+        },
+        "blocked": _gate_blocked_view(issue, names),
+        "interactions": views,
+    }
+
+
+def _gate_issue_or_error(company, issue_id):
+    if not isinstance(issue_id, str) or not UUID_RE.fullmatch(issue_id.strip()):
+        return None, {"ok": False, "error": "issueId 必须是任务 UUID。"}
+    issue = _gate_find_issue(company, issue_id.strip())
+    if not issue:
+        return None, {"ok": False, "error": "未在当前团队任务窗口内找到该任务。"}
+    return issue, None
+
+
+def _invalidate_issue_state(company, issue_id):
+    """写操作成功后清缓存：任务列表、巡检聚合、该任务的交互与评论。"""
+    for key in list(_CACHE):
+        if key.startswith(("issues:", "tasks:", "agents:")) or key.startswith("ops:"):
+            _CACHE.pop(key, None)
+        elif key == "c:" + issue_id:
+            _CACHE.pop(key, None)
+
+
+def _clean_answers(answers):
+    """answers: [{questionId, optionIds, otherText?}]；脏数据整体拒绝，不猜意图。"""
+    if not isinstance(answers, list) or not answers or len(answers) > GATE_ANSWER_LIMIT:
+        return None
+    cleaned = []
+    for answer in answers:
+        if not isinstance(answer, dict):
+            return None
+        question_id = answer.get("questionId")
+        option_ids = answer.get("optionIds")
+        other = answer.get("otherText")
+        if not isinstance(question_id, str) or not question_id.strip():
+            return None
+        if not isinstance(option_ids, list):
+            return None
+        ids = []
+        for option_id in option_ids:
+            if not isinstance(option_id, str) or not option_id.strip():
+                return None
+            ids.append(option_id.strip()[:160])
+        if other is not None and not isinstance(other, str):
+            return None
+        entry = {"questionId": question_id.strip()[:160], "optionIds": ids}
+        if isinstance(other, str) and other.strip():
+            entry["otherText"] = other
+        cleaned.append(entry)
+    return cleaned
+
+
+def _gate_interaction_or_error(company, issue_id, interaction_id):
+    issue, error = _gate_issue_or_error(company, issue_id)
+    if error:
+        return None, None, error
+    if not isinstance(interaction_id, str) or not UUID_RE.fullmatch(interaction_id.strip()):
+        return None, None, {"ok": False, "error": "interactionId 必须是交互 UUID。"}
+    return issue, interaction_id.strip(), None
+
+
+def respond_interaction(company, issue_id, interaction_id, answers):
+    """回答 ask_user_questions：代理 Paperclip 原生 respond 接口。"""
+    issue, interaction_id, error = _gate_interaction_or_error(company, issue_id, interaction_id)
+    if error:
+        return error
+    cleaned = _clean_answers(answers)
+    if cleaned is None:
+        return {"ok": False,
+                "error": "answers 格式不正确，需要 [{questionId, optionIds, otherText?}] 且至少一条。"}
+    st, data = call("POST", f"/api/issues/{issue['id']}/interactions/{interaction_id}/respond",
+                    {"answers": cleaned})
+    if st in (200, 201) and isinstance(data, dict):
+        _invalidate_issue_state(company, issue["id"])
+        return {"ok": True, "status": data.get("status")}
+    return {"ok": False, "error": _upstream_error("提交回答失败", st, data)}
+
+
+def resolve_interaction(company, issue_id, interaction_id, decision, reason=None, selected_option_ids=None):
+    """接受/拒绝 request_confirmation 类交互。"""
+    issue, interaction_id, error = _gate_interaction_or_error(company, issue_id, interaction_id)
+    if error:
+        return error
+    if decision not in ("accept", "reject"):
+        return {"ok": False, "error": "decision 只支持 accept 或 reject。"}
+    body = {}
+    if decision == "reject":
+        if isinstance(reason, str) and reason.strip():
+            body["reason"] = reason.strip()[:4000]
+    else:
+        ids = []
+        if isinstance(selected_option_ids, list):
+            for option_id in selected_option_ids:
+                if isinstance(option_id, str) and option_id.strip():
+                    ids.append(option_id.strip()[:120])
+        if ids:
+            body["selectedOptionIds"] = ids[:50]
+    st, data = call("POST", f"/api/issues/{issue['id']}/interactions/{interaction_id}/{decision}", body)
+    if st in (200, 201) and isinstance(data, dict):
+        _invalidate_issue_state(company, issue["id"])
+        return {"ok": True, "status": data.get("status")}
+    return {"ok": False, "error": _upstream_error("处理确认失败", st, data)}
+
+
+def reply_issue(company, issue_id, text, reopen):
+    """任务讨论区回复；reopen=True 时由 Paperclip 判断是否恢复阻塞任务并唤醒成员。"""
+    issue, error = _gate_issue_or_error(company, issue_id)
+    if error:
+        return error
+    body = (text or "").strip() if isinstance(text, str) else ""
+    if not body:
+        return {"ok": False, "error": "回复内容不能为空。"}
+    payload = {"body": body[:20000], "clientRequestId": str(uuid.uuid4())}
+    if reopen:
+        payload["reopen"] = True
+    st, data = call("POST", f"/api/issues/{issue['id']}/comments", payload)
+    if st in (200, 201):
+        _invalidate_issue_state(company, issue["id"])
+        return {"ok": True, "mode": "comment", "reopened": bool(reopen),
+                "issue": issue.get("identifier")}
+    return {"ok": False, "error": _upstream_error("回复失败", st, data)}

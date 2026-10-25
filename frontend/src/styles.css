@@ -2352,6 +2352,16 @@ a:focus-visible {
   font-size: 11.5px;
   padding: 6px 2px;
 }
+.ops-section-hint {
+  font-size: 10.5px;
+  color: var(--ink-3);
+  margin: -2px 0 6px;
+  padding: 5px 8px;
+  border-left: 2px solid #f3c9a9;
+  background: var(--accent-weak);
+  border-radius: 0 5px 5px 0;
+  overflow-wrap: anywhere;
+}
 .ops-row-title {
   display: flex;
   align-items: baseline;
@@ -2432,6 +2442,188 @@ a:focus-visible {
   color: var(--ink-3);
   font-size: 10.5px;
   margin: 3px 0 0;
+}
+/* 巡检处理入口：详情抽屉里的「等你处理 / 等你回答」操作卡 */
+.gate-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0 4px;
+}
+.gate-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: #fff;
+  padding: 11px 12px;
+  font-size: 12px;
+}
+.gate-card-blocked {
+  border-color: #f3c9a9;
+  background: var(--accent-weak);
+}
+.gate-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gate-chip {
+  flex: none;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+  background: var(--rail);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+.gate-chip.warn {
+  color: var(--accent);
+  background: #fff;
+  border-color: #f3c9a9;
+}
+.gate-meta {
+  font-size: 10.5px;
+  color: var(--ink-3);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.gate-action {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.gate-summary {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.gate-question {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 9px 10px;
+  background: var(--rail);
+}
+.gate-question-prompt {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.gate-question-index {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--ink);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  transform: translateY(1px);
+}
+.gate-required {
+  flex: none;
+  font-size: 9.5px;
+  font-style: normal;
+  color: var(--accent);
+  background: #fff;
+  border: 1px solid #f3c9a9;
+  border-radius: 4px;
+  padding: 0 5px;
+}
+.gate-question-mode {
+  margin-left: auto;
+  flex: none;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+.gate-help {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.gate-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 7px;
+}
+.gate-option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: #fff;
+  padding: 7px 10px;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+.gate-option:hover {
+  background: var(--accent-weak);
+  border-color: #f3c9a9;
+}
+.gate-option.selected {
+  background: var(--accent-weak);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.gate-option-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.gate-option-desc {
+  font-size: 10.5px;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.gate-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gate-error {
+  font-size: 11px;
+  color: #b42318;
+}
+.gate-note {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.gate-details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--rail);
+  padding: 8px 10px;
+  font-size: 11.5px;
+}
+.gate-details .markdown {
+  font-size: 11.5px;
+}
+.gate-reject {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .full-width {
   width: 100%;

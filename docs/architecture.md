@@ -39,6 +39,8 @@ Python ThreadingHTTPServer (backend/paperclip_room/http.py)
 | GET | `/api/teams` | 当前 token 可见的 active 团队（Paperclip 公司），含默认团队标记 |
 | GET | `/api/state?company=<id>` | 指定团队成员、当前任务、活跃运行与模型快照；活跃运行区分任务运行/后台运行及运行中/排队 |
 | GET | `/api/ops?company=<id>` | 只读巡检：等你处理/等你回答、阻塞时长、陈旧 in_progress、近 24h 超时与失败 |
+| GET | `/api/issue-gate?company=<id>&issue=<uuid或编号>` | 任务处理入口：该任务的阻塞描述（等待谁、要做什么、阻塞多久）与 pending 交互（问题/确认），只读；详情抽屉每 8 秒刷新 |
+| POST | `/api/issue-gate?company=<id>` | JSON `{ issueId, action, … }`；`action=respond` 携带 `interactionId + answers` 回答问题，`action=resolve` 携带 `decision=accept/reject`（可带 `reason` / `selectedOptionIds`）处理确认，`action=reply` 携带 `text + reopen` 回复任务讨论区并可选恢复阻塞任务 |
 | GET | `/api/chat?company=<id>&agent=<id>` | 当前 board 用户与该成员的 Agent Chat 会话与消息 |
 | POST | `/api/chat?company=<id>` | JSON `{ "agentId": "…", "text": "…" }`；发送 Agent Chat 消息，必要时自动创建会话 |
 | GET | `/api/tasks?company=<id>&agent=<id>` | 成员名下未结/最近完成、近期参与讨论及有界窗口内实际执行过的任务；含检查项、运行与讨论摘要 |
@@ -55,7 +57,7 @@ Python ThreadingHTTPServer (backend/paperclip_room/http.py)
 
 ## Paperclip 接口依赖
 
-后端使用公司的 agents、issues、heartbeat-runs 列表、任务 comments、Agent Chat chats 接口、单个 heartbeat run、成员 PATCH（adapterConfig/runtimeConfig/name/title），以及 instructions-bundle 读写等接口。API 根路径由 `PAPERCLIP_BASE` 追加 `/api/...` 形成。不同 Paperclip 版本或 token 权限可能影响字段和可用性，应以所部署版本为准。
+后端使用公司的 agents、issues、heartbeat-runs 列表、任务 comments、Agent Chat chats 接口、单个 heartbeat run、成员 PATCH（adapterConfig/runtimeConfig/name/title），instructions-bundle 读写，issue interactions 列表与 respond/accept/reject，以及带 `reopen` 的任务评论等接口。API 根路径由 `PAPERCLIP_BASE` 追加 `/api/...` 形成。不同 Paperclip 版本或 token 权限可能影响字段和可用性，应以所部署版本为准。
 
 本项目主要为 Hermes 本地适配器运行的团队设计。页面读取已有运行、评论和配置，不承担 Paperclip 调度器或 Agent runner 的职责。
 
@@ -102,7 +104,7 @@ Agent Chat 需要实例 Experimental 设置中的 `enableAgentChat` 已开启，
 - `/api/state` 的 `live` 把每条 `running/queued` 运行按是否落在当前任务窗口内分为任务运行与后台运行，并分别给出运行中/排队数量；左栏、标题和顶栏共用这份口径，不再把后台心跳写成“活跃”或“执行中”。任务视图把未出现在当前筛选任务集合内的运行单列（含状态与查看运行入口），但不为它们合成任务条。
 - 任务时间线只展示最近100个任务内的运行；Agent Chat 会话运行不属于任务，会被排除，避免在时间线上出现 UUID 标题的运行卡；这类运行只作为后台运行提示出现。
 - 评论时间线扫描最近6个名下任务与12个其他任务，输出最近160个事件，不是全历史。
-- 巡检取最近5000个任务与2000次运行；被隐藏/删除的任务与超出窗口的运行不计入。交互只在陈旧候选（最多12条）上逐条读取。
+- 巡检取最近5000个任务与2000次运行；被隐藏/删除的任务与超出窗口的运行不计入。交互只在陈旧候选（最多12条）上逐条读取。处理入口 `/api/issue-gate` 与巡检共用任务窗口和交互缓存。
 - 接收对象只依据评论首行明确指向；未指定对象的消息显示实际任务讨论区。
 - 回执查询最近至多200条heartbeat runs，缓存4秒，以评论ID与任务ID双重精确匹配唤醒上下文。未查到不等于无人接收，运行成功不等于逐条已读或业务验收。
 - 会话最近4次运行，每次默认最近60条原始助手/工具消息；运行中读取取决于Hermes写入数据库的时机，非逐token流式输出。
@@ -120,6 +122,16 @@ Agent Chat 需要实例 Experimental 设置中的 `enableAgentChat` 已开启，
 - **配置预检**：对未暂停成员检查 `hermesCommand` 是否存在、是否配置模型、`timeoutSec` 是否低于 1200s、成员是否处于 `error`；只读，不修改配置。
 - **告警**：`board_gate`、`awaiting_answer`、`stale_status`、`timeouts`（>2）、`failures`（>0）、`preflight`（配置有问题）。
 - **边界**：这是“当前 board 视角”的巡检，不是全历史审计；被平台隐藏或删除的 issue 不会出现，超过 limit 的历史运行不计入。
+
+### 巡检处理入口（issue-gate）
+
+巡检只指出“要处理”，`/api/issue-gate` 负责让详情页可操作。点击巡检条目打开任务详情抽屉时，抽屉顶部按需渲染处理卡：
+
+- **等你处理（任务阻塞）**：展示等待对象、`unblockDescriptor.action` 与阻塞/静默时长；提供回复框，「回复并恢复任务」发送 `reopen: true` 的任务评论，「仅评论」不带 reopen。是否真的恢复为 todo、是否唤醒成员由 Paperclip 按阻塞原因判定，控制台不自己改状态。
+- **等你回答（`ask_user_questions`）**：渲染完整问题列表（单选/多选、选项说明、自由填写选项、`allowOther`），必答未选时不允许提交；提交代理 Paperclip 原生 `POST /api/issues/{id}/interactions/{interactionId}/respond`。
+- **等你确认（`request_confirmation` / `request_checkbox_confirmation`）**：展示提示与详情 Markdown，勾选确认的选项后接受（`selectedOptionIds`）或拒绝（可带 `reason`，`rejectRequiresReason` 时必填）；代理原生 `accept` / `reject` 接口。
+- **其他交互类型**（`suggest_tasks`、`connection_intent` 等）：明确提示到 Paperclip 任务页处理，不假装可操作。
+- 任务按 UUID 或编号解析，解析范围与巡检共用同一 5000 条任务窗口（缓存 20 秒），天然限定当前团队；交互列表复用巡检的 `ops:interactions:<issueId>` 20 秒缓存。写操作成功后失效任务、巡检、交互与评论缓存，下一轮轮询即可看到新状态。上游 4xx（如权限策略不允许、交互已被处理）原样透出错误信息，不做二次猜测。
 
 ## 前端状态
 

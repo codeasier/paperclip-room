@@ -7,6 +7,7 @@ import { StatusTag } from '../../components/StatusTag';
 import { clockLabel, dateLabel, dayLabel, duration, runStatuses } from '../../lib/format';
 import { taskIntervals } from '../../lib/timeline';
 import { ExecutionProcess } from '../execution/ExecutionProcess';
+import { IssueGatePanel } from './IssueGatePanel';
 
 export type Detail =
   | { kind: 'overview' }
@@ -206,6 +207,10 @@ export function DetailDrawer({
               )}
             </div>
           )}
+          <IssueGatePanel
+            company={company}
+            issueRef={detail.kind === 'task' ? detail.taskId : task?.id}
+          />
           {runId ? (
             <ExecutionProcess
               key={`${agentId}:${runId}`}

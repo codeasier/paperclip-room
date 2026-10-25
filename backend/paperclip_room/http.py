@@ -48,7 +48,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if url.path == "/api/teams":
                 return self._send(200, s.teams_payload())
-            if url.path not in ("/api/state", "/api/ops", "/api/tasks", "/api/chat", "/api/room", "/api/execution", "/api/run", "/api/chat-activity", "/api/member-config"):
+            if url.path not in ("/api/state", "/api/ops", "/api/tasks", "/api/chat", "/api/room", "/api/execution", "/api/run", "/api/chat-activity", "/api/member-config", "/api/issue-gate"):
                 return self._send(404, {"error": "not found"})
             company = self._company(query)
             if not company:
@@ -57,6 +57,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, s.agent_snapshot(company))
             if url.path == "/api/ops":
                 return self._send(200, s.cached("ops:" + company, 15, lambda: s.ops_payload(company)))
+            if url.path == "/api/issue-gate":
+                issue_ref = (query.get("issue", [""])[0] or "").strip()
+                if not issue_ref or len(issue_ref) > 80:
+                    return self._send(400, {"error": "valid issue required"})
+                return self._send(200, s.issue_gate(company, issue_ref))
             aid = query.get("agent", [""])[0]
             if not re.fullmatch(r"[a-zA-Z0-9-]{1,80}", aid):
                 return self._send(400, {"error": "valid agent required"})
@@ -106,11 +111,27 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length)) if length else {}
             if not isinstance(body, dict):
                 raise ValueError("JSON object required")
-            if url.path not in ("/api/tasks", "/api/chat", "/api/send", "/api/model", "/api/member-config"):
+            if url.path not in ("/api/tasks", "/api/chat", "/api/send", "/api/model", "/api/member-config", "/api/issue-gate"):
                 return self._send(404, {"error": "not found"})
             company = self._company(parse_qs(url.query), body)
             if not company:
                 return self._send(404, {"error": "team not found"})
+            if url.path == "/api/issue-gate":
+                issue_id = body.get("issueId")
+                action = body.get("action")
+                if not isinstance(issue_id, str):
+                    return self._send(400, {"ok": False, "error": "issueId required"})
+                if action == "respond":
+                    result = s.respond_interaction(company, issue_id, body.get("interactionId"), body.get("answers"))
+                elif action == "resolve":
+                    result = s.resolve_interaction(company, issue_id, body.get("interactionId"),
+                                                   body.get("decision"), body.get("reason"),
+                                                   body.get("selectedOptionIds"))
+                elif action == "reply":
+                    result = s.reply_issue(company, issue_id, body.get("text"), body.get("reopen") is True)
+                else:
+                    return self._send(400, {"ok": False, "error": "action must be respond, resolve or reply"})
+                return self._send(200 if result.get("ok") else 400, result)
             if url.path == "/api/member-config":
                 aid = body.get("agentId")
                 if not isinstance(aid, str) or not aid.strip():
