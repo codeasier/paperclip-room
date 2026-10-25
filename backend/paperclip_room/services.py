@@ -817,6 +817,134 @@ def execution_run(run, before=0, company=None):
     return {"id": run["id"], "agentId": run["agentId"], "status": run.get("status"), "ts": run.get("startedAt") or run.get("createdAt"), "finishedAt": run.get("finishedAt"), "issue": issue.get("identifier") or context.get("taskKey"), "issueTitle": issue.get("title") or "运行会话", "error": public_text(run.get("error") or "")["text"], "summary": public_text(summary), **session_transcript(run, before, company=company)}
 
 
+CHAT_ACTIVITY_STEPS = 10
+CHAT_ACTIVITY_TTL = 2.0
+
+
+def _activity_text(row, key):
+    """老库可能缺列；缺列按空值处理，不让一次读取失败。"""
+    return row[key] if key in row.keys() else None
+
+
+def _redact_activity(text):
+    """命令和思考里可能带令牌前缀；先挡一层，其余交给 public_text 的通用规则。"""
+    text = re.sub(r"\b(gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})", "[已隐藏凭据]", text)
+    return re.sub(r"\bsk-[A-Za-z0-9_-]{16,}", "[已隐藏凭据]", text)
+
+
+def _tool_command(arguments):
+    """终端调用只展示命令本身，避免把整段参数 JSON 摊在界面上。"""
+    value = decoded(arguments, None)
+    if isinstance(value, dict) and isinstance(value.get("command"), str):
+        return value["command"]
+    return arguments if isinstance(arguments, str) else json.dumps(value, ensure_ascii=False)
+
+
+def _tool_output(content):
+    """工具结果是 {"output": ...} 这类包装时只取正文，别把 JSON 外壳摊给用户。"""
+    value = decoded(content, None)
+    if isinstance(value, dict):
+        for key in ("output", "stdout", "result"):
+            text = value.get(key)
+            if isinstance(text, str) and text.strip():
+                return text
+        if value.get("error"):
+            error = value["error"]
+            return error if isinstance(error, str) else json.dumps(error, ensure_ascii=False)
+    return display_content(content or "")
+
+
+def _session_of_run(run, db):
+    """运行中的 sessionIdAfter 还是空的；先用 sessionIdBefore，再按开始时间找唯一新会话。"""
+    sid = run.get("sessionIdAfter") or run.get("sessionIdBefore")
+    if sid:
+        return sid
+    start = _ts(run.get("startedAt") or run.get("createdAt"))
+    if not start:
+        return None
+    try:
+        rows = db.execute(
+            "SELECT id FROM sessions WHERE started_at>=? AND started_at<=? ORDER BY started_at",
+            (start - 5, start + 120),
+        ).fetchall()
+    except sqlite3.Error:
+        return None
+    # 同一时间窗里出现多个会话说明无法确定归属，宁可说读不到，也不混用别的会话。
+    return rows[0]["id"] if len(rows) == 1 else None
+
+
+def _session_tail(run, limit):
+    """按 Paperclip 记录的会话标识读取本次运行窗口；找不到会话返回 None。"""
+    if not HERMES_DB.is_file():
+        return None
+    start = _ts(run.get("startedAt") or run.get("createdAt")) - 2
+    finish = _ts(run.get("finishedAt"))
+    end = finish + 2 if finish else time.time() + 5
+    try:
+        with closing(sqlite3.connect(HERMES_DB.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)) as db:
+            db.row_factory = sqlite3.Row
+            sid = _session_of_run(run, db)
+            if not sid:
+                return None
+            rows = db.execute(
+                "SELECT id,role,content,tool_calls,tool_name,reasoning,reasoning_content,timestamp"
+                " FROM messages WHERE session_id=? AND role IN ('assistant','tool')"
+                " AND timestamp>=? AND timestamp<=? ORDER BY id DESC LIMIT ?",
+                (sid, start, end, limit),
+            ).fetchall()
+    except (sqlite3.Error, ValueError, TypeError, OverflowError):
+        return None
+    return list(reversed(rows))
+
+
+def chat_activity(run):
+    """对话回合进行中的实时步骤：思考、工具调用与输出。
+
+    只读本次运行窗口内的会话记录，不做跨运行推断；读不到就明确说读不到。
+    """
+    def _load():
+        rows = _session_tail(run, CHAT_ACTIVITY_STEPS * 2)
+        if rows is None:
+            return {"state": "unavailable", "steps": [], "note": "暂时定位不到这次运行的会话记录，只能看运行状态与耗时。"}
+        if not rows:
+            return {"state": "pending", "steps": [], "note": "这一轮还没有可读的助手或工具记录。"}
+        steps = []
+        for row in rows:
+            ts = datetime.fromtimestamp(row["timestamp"], timezone.utc).isoformat()
+            if row["role"] == "assistant":
+                reasoning = (_activity_text(row, "reasoning") or _activity_text(row, "reasoning_content") or "").strip()
+                if reasoning:
+                    steps.append({"id": f"r-{row['id']}", "kind": "thinking", "ts": ts,
+                                  **public_text(_redact_activity(reasoning), 400)})
+                text = display_content(row["content"] or "")
+                if text.strip():
+                    steps.append({"id": f"m-{row['id']}", "kind": "assistant", "ts": ts,
+                                  **public_text(text, 600)})
+                calls = decoded(row["tool_calls"], [])
+                for index, tool in enumerate(calls if isinstance(calls, list) else []):
+                    if not isinstance(tool, dict):
+                        continue
+                    function = tool.get("function") or {}
+                    steps.append({
+                        "id": f"m-{row['id']}-t-{index}", "kind": "tool_call", "ts": ts,
+                        "name": function.get("name") or "工具",
+                        "toolCallId": tool.get("id") or tool.get("call_id"),
+                        **public_text(_redact_activity(_tool_command(function.get("arguments") or "")), 300),
+                    })
+                continue
+            result = decoded(row["content"], {})
+            is_error = isinstance(result, dict) and (
+                bool(result.get("error")) or result.get("exit_code") not in (None, 0)
+            )
+            steps.append({"id": f"t-{row['id']}", "kind": "tool_result", "ts": ts,
+                          "name": row["tool_name"], "isError": is_error,
+                          **public_text(_redact_activity(_tool_output(row["content"] or "")), 240)})
+        return {"state": "available", "steps": steps[-CHAT_ACTIVITY_STEPS:],
+                "note": "来自 Hermes 会话的实时步骤；思考与输出过长时截断。"}
+    key = "chat-activity:" + str(run.get("id")) + ":" + str(run.get("sessionIdAfter"))
+    return cached(key, CHAT_ACTIVITY_TTL, _load)
+
+
 def execution_timeline(agent_id, company=None):
     company = company or COMPANY
     if not any(a.get("id") == agent_id for a in agents_for(company)):

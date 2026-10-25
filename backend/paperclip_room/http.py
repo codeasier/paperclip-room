@@ -48,7 +48,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if url.path == "/api/teams":
                 return self._send(200, s.teams_payload())
-            if url.path not in ("/api/state", "/api/ops", "/api/tasks", "/api/chat", "/api/room", "/api/execution", "/api/run", "/api/member-config"):
+            if url.path not in ("/api/state", "/api/ops", "/api/tasks", "/api/chat", "/api/room", "/api/execution", "/api/run", "/api/chat-activity", "/api/member-config"):
                 return self._send(404, {"error": "not found"})
             company = self._company(query)
             if not company:
@@ -76,6 +76,14 @@ class Handler(BaseHTTPRequestHandler):
                 result = s.room_timeline(aid, company=company)
             elif url.path == "/api/execution":
                 result = s.cached(f"exec:{company}:{aid}", 4, lambda: s.execution_timeline(aid, company))
+            elif url.path == "/api/chat-activity":
+                rid = query.get("run", [""])[0]
+                if not re.fullmatch(r"[0-9a-fA-F-]{36}", rid):
+                    return self._send(400, {"error": "valid run required"})
+                status, run = s.call("GET", "/api/heartbeat-runs/" + rid)
+                if status != 200 or not isinstance(run, dict) or run.get("companyId") != company or run.get("agentId") != aid:
+                    return self._send(404, {"error": "run not found for this member"})
+                result = s.chat_activity(run)
             else:
                 rid = query.get("run", [""])[0]
                 before = int(query.get("before", ["0"])[0])

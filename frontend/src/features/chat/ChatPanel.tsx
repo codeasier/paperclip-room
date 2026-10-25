@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Alert, App, Button, Input, Typography } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined } from '@ant-design/icons';
@@ -8,6 +8,8 @@ import { useRoomQuery } from '../../hooks/useRoomQuery';
 import { Markdown } from '../../components/Markdown';
 import { MemberAvatar } from '../../components/MemberAvatar';
 import { clockLabel, dayLabel } from '../../lib/format';
+import { chatRun, replyLabel, replyState } from '../../lib/chatReply';
+import { ChatActivity } from './ChatActivity';
 
 interface Props {
   company: string;
@@ -23,15 +25,23 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
   const query = useRoomQuery<ChatResponse>('/api/chat', company, agent.id, 4000, active);
   const mutationKey = ['send', company, agent.id];
   const sending = useIsMutating({ mutationKey }) > 0;
-  const [awaitingAfter, setAwaitingAfter] = useState<string | null>(null);
   const [showLatest, setShowLatest] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const stream = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const composing = useRef(false);
   const compositionEnd = useRef(0);
   const enabled = query.data?.state === 'new' || query.data?.state === 'available';
   const messages = query.data?.messages || [];
-  const lastMessage = messages.at(-1);
+  const run = chatRun(agent, query.data?.chat?.id);
+  const reply = replyState({ messages, run, now });
+  const pending = reply !== null;
+  useEffect(() => {
+    if (!pending) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [pending]);
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const mutation = useMutation({
@@ -41,7 +51,6 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
     onSuccess: (_data, text) => {
       // Do not wipe text typed while this send was in flight.
       if (draftRef.current.trim() === text) onDraft('');
-      setAwaitingAfter(lastMessage?.id || '');
       stickToBottom.current = true;
       void client.invalidateQueries({ queryKey: ['/api/chat', company, agent.id] });
       void client.invalidateQueries({ queryKey: ['/api/state', company] });
@@ -66,11 +75,7 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
   useLayoutEffect(() => {
     if (stickToBottom.current && stream.current)
       stream.current.scrollTop = stream.current.scrollHeight;
-  }, [messages]);
-  const replying =
-    (awaitingAfter !== null &&
-      (lastMessage?.id === awaitingAfter || lastMessage?.author !== 'agent')) ||
-    query.data?.chat?.conversationState === 'awaiting_agent';
+  }, [messages, pending]);
   return (
     <section className="chat-panel">
       <div className="chat-stream-wrap">
@@ -149,7 +154,15 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
                 </article>
               </Fragment>
             ))}
-            {replying && <Typography.Text type="secondary">{agent.name} 正在回复…</Typography.Text>}
+            {reply && (
+              <div className={`chat-reply ${reply.phase}`} role="status" aria-live="polite">
+                <span className="chat-reply-dot" aria-hidden="true" />
+                <span>{replyLabel(reply, agent.name)}</span>
+              </div>
+            )}
+            {run?.status === 'running' && (
+              <ChatActivity company={company} agentId={agent.id} runId={run.id} />
+            )}
           </div>
         </div>
         {showLatest && (
