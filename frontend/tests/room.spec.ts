@@ -1022,9 +1022,12 @@ test('shows chat turn state instead of a silent gap while the member works', asy
   await expect(status).toContainText('PL 正在处理…');
   await expect(status).toContainText('前有输出');
   const activity = page.getByRole('group', { name: '对话过程' });
-  await expect(activity).toContainText('先核对看板上的未闭环任务');
+  await expect(activity).toContainText('思考 1 次 · 执行 1 条命令');
   await expect(activity).toContainText('gh issue list --state open');
-  await page.getByRole('button', { name: '展开 3 步' }).click();
+  await expect(activity).not.toContainText('先核对看板上的未闭环任务');
+  await page.getByRole('button', { name: '展开过程' }).click();
+  await expect(activity).toContainText('思考过程');
+  await expect(activity).toContainText('先核对看板上的未闭环任务');
   await expect(activity).toContainText('25 条未闭环');
 
   // 没有运行接管时要如实说"已送达，等待"，而不是重复"正在处理"

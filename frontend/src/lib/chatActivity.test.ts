@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActivityStep } from '../api/types';
-import { activityHint, activityRows, activitySummary, oneLine } from './chatActivity';
+import { activityHint, activityRows, oneLine } from './chatActivity';
 
 function step(overrides: Partial<ActivityStep>): ActivityStep {
   return { id: 's1', kind: 'thinking', text: '思考内容', ...overrides };
@@ -25,16 +25,6 @@ describe('chat activity rows', () => {
     ]);
     expect(rows[0].text).toBe('line1 line2');
     expect(rows[0].error).toBe(true);
-  });
-
-  it('keeps only the latest row of each kind when collapsed', () => {
-    const rows = activitySummary([
-      step({ id: 't1', kind: 'thinking', text: '旧思考' }),
-      step({ id: 't2', kind: 'thinking', text: '新思考' }),
-      step({ id: 'c1', kind: 'tool_call', text: 'old', name: 'terminal' }),
-      step({ id: 'c2', kind: 'tool_call', text: 'new', name: 'terminal' }),
-    ]);
-    expect(rows.map((row) => row.id)).toEqual(['t2', 'c2']);
   });
 
   it('marks empty tool output instead of showing a blank row', () => {

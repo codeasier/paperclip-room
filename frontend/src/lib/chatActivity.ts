@@ -42,15 +42,6 @@ export function activityRows(steps: ActivityStep[]): ActivityRow[] {
   });
 }
 
-/** 折叠态：只留每一类最近的一步，够看清"在想什么、在跑什么命令"。 */
-export function activitySummary(steps: ActivityStep[]): ActivityRow[] {
-  const rows = activityRows(steps);
-  const latest = (tone: ActivityTone) => [...rows].reverse().find((row) => row.tone === tone);
-  return [latest('thinking'), latest('tool'), latest('result')].filter((row): row is ActivityRow =>
-    Boolean(row),
-  );
-}
-
 /** 还没有步骤时该说什么：不同原因不能都显示成同一句"加载中"。 */
 export function activityHint(input: { failed: boolean; state?: string; note?: string }) {
   if (input.failed) return '过程读取失败，稍后自动重试';

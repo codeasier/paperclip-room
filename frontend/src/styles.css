@@ -891,85 +891,100 @@ a:focus-visible {
   animation: none;
   opacity: 0.55;
 }
-.chat-activity {
-  margin: 2px 0 0 39px;
-  max-width: 640px;
-  border: 1px solid var(--line-2);
-  border-radius: 12px;
-  background: #fff;
-  padding: 8px 11px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.activity-hint {
+/* 过程块：灰色、紧凑、默认折叠，跟 Hermes 客户端的思考/工具记录一致 */
+.chat-flow {
+  margin: 0 0 2px 39px;
+  max-width: 660px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: var(--rail);
   font-size: 12px;
-  line-height: 1.5;
   color: var(--ink-3);
 }
-.activity-head {
+.chat-flow-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
+  width: 100%;
+  padding: 1px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-flow-head:hover .chat-flow-count {
+  color: var(--ink);
+}
+.chat-flow-head .anticon,
+.chat-flow-empty .anticon,
+.chat-flow-row .anticon {
+  flex: none;
   font-size: 11px;
   color: var(--ink-3);
 }
-.activity-toggle {
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  color: var(--accent);
-  cursor: pointer;
+.chat-flow-count {
+  flex: none;
+  color: var(--ink-2);
+  transition: color 0.15s;
 }
-.activity-toggle:hover {
-  text-decoration: underline;
+.chat-flow-latest {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
 }
-.activity-row {
+.chat-flow-caret {
+  flex: none;
+  margin-left: auto;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+.chat-flow-caret.open {
+  transform: rotate(90deg);
+}
+.chat-flow-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+}
+.chat-flow-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0 2px;
+}
+.chat-flow-row {
   display: flex;
   align-items: baseline;
   gap: 6px;
   min-width: 0;
-  font-size: 12px;
-  line-height: 1.5;
   color: var(--ink-2);
 }
-.activity-tag {
+.chat-flow-label {
   flex: none;
-  padding: 0 5px;
-  border-radius: 5px;
-  background: var(--rail);
   color: var(--ink-3);
-  font-size: 10.5px;
 }
-.activity-row.tool .activity-tag,
-.activity-row.result .activity-tag {
-  background: var(--accent-weak);
-  color: #a24513;
-}
-.activity-row.error .activity-text {
-  color: #b42318;
-}
-.activity-name {
-  flex: none;
-  font-weight: 600;
-  color: var(--ink-2);
-}
-.activity-text {
+.chat-flow-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.activity-row.thinking .activity-text {
+.chat-flow-row.thinking .chat-flow-text {
   color: var(--ink-3);
 }
-@media (max-width: 760px) {
-  .chat-activity {
-    margin-left: 0;
-    max-width: none;
-  }
+.chat-flow-row.result {
+  padding-left: 5px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.chat-flow-row.error .chat-flow-text {
+  color: #b42318;
 }
 @keyframes chat-reply-pulse {
   0%,
