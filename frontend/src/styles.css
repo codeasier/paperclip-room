@@ -891,100 +891,140 @@ a:focus-visible {
   animation: none;
   opacity: 0.55;
 }
-/* 过程块：灰色、紧凑、默认折叠，跟 Hermes 客户端的思考/工具记录一致 */
-.chat-flow {
-  margin: 0 0 2px 39px;
-  max-width: 660px;
-  padding: 5px 10px;
-  border-radius: 10px;
-  background: var(--rail);
-  font-size: 12px;
-  color: var(--ink-3);
+/* Events share the assistant text gutter, not a separate aggregate process card. */
+.chat-message.agent .message-body {
+  max-width: min(calc(100% - 39px), 720px);
 }
-.chat-flow-head {
+.chat-message.agent .message-bubble {
+  border: 0;
+  border-radius: 0;
+  padding: 3px 0;
+  background: transparent;
+}
+.chat-event {
+  min-width: 0;
+  width: calc(100% - 39px);
+  max-width: 720px;
+  margin: -3px 0 -3px 39px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.chat-event > summary {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 1px 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: inherit;
-  text-align: left;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 6px;
+  margin-left: -6px;
+  border-radius: 6px;
+  list-style: none;
   cursor: pointer;
 }
-.chat-flow-head:hover .chat-flow-count {
-  color: var(--ink);
+.chat-event > summary::-webkit-details-marker {
+  display: none;
 }
-.chat-flow-head .anticon,
-.chat-flow-empty .anticon,
-.chat-flow-row .anticon {
+.chat-event > summary:hover {
+  background: var(--rail);
+  color: var(--ink-2);
+}
+.chat-event > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.chat-event > summary > .anticon {
   flex: none;
-  font-size: 11px;
-  color: var(--ink-3);
+  font-size: 12px;
 }
-.chat-flow-count {
+.chat-event-label {
   flex: none;
   color: var(--ink-2);
-  transition: color 0.15s;
+  font-weight: 500;
 }
-.chat-flow-latest {
-  flex: 1;
+.chat-event-preview {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ink-3);
+  text-overflow: ellipsis;
 }
-.chat-flow-caret {
+.command-preview {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 11.5px;
+}
+.chat-event-state {
   flex: none;
   margin-left: auto;
-  font-size: 10px;
+  font-size: 10.5px;
+}
+.chat-event.failed .chat-event-state {
+  color: #b42318;
+}
+.chat-event-caret {
+  margin-left: auto;
   transition: transform 0.15s;
 }
-.chat-flow-caret.open {
+.chat-event-state + .chat-event-caret {
+  margin-left: 0;
+}
+.chat-event[open] > summary .chat-event-caret {
   transform: rotate(90deg);
 }
-.chat-flow-empty {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 1px 0;
+.chat-event[open] > summary .chat-event-preview {
+  visibility: hidden;
 }
-.chat-flow-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 0 2px;
-}
-.chat-flow-row {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
+.chat-event-detail {
+  margin: 5px 0 4px 5px;
+  border-left: 2px solid var(--line-2);
+  padding: 4px 14px 8px;
+  max-height: 420px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+  line-height: 1.65;
   color: var(--ink-2);
 }
-.chat-flow-label {
-  flex: none;
+.thinking-detail .markdown {
   color: var(--ink-3);
+  font-size: 12px;
 }
-.chat-flow-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.chat-event-section + .chat-event-section {
+  margin-top: 14px;
 }
-.chat-flow-row.thinking .chat-flow-text {
+.chat-event-section-label {
+  display: block;
+  margin-bottom: 5px;
   color: var(--ink-3);
+  font-size: 11px;
 }
-.chat-flow-row.result {
-  padding-left: 5px;
+.tool-detail pre {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 6px;
+  background: var(--rail);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
   font-size: 11.5px;
-  color: var(--ink-3);
+  line-height: 1.65;
 }
-.chat-flow-row.error .chat-flow-text {
+.chat-event-section.error pre {
   color: #b42318;
+}
+.chat-event-note,
+.chat-event-history-note {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.chat-event-history-note {
+  margin: 0 0 0 39px;
+}
+.chat-reply {
+  flex-wrap: wrap;
+}
+.chat-reply-hint {
+  flex-basis: 100%;
+  padding-left: 14px;
+  font-size: 11px;
 }
 @keyframes chat-reply-pulse {
   0%,
@@ -2597,6 +2637,27 @@ a:focus-visible {
   .message-bubble {
     font-size: 13px;
     padding: 8px 10px;
+  }
+  .chat-event {
+    width: calc(100% - 35px);
+    margin-left: 35px;
+  }
+  .chat-message.agent .message-body {
+    max-width: calc(100% - 35px);
+  }
+  .chat-reply,
+  .chat-event-history-note {
+    padding-left: 35px;
+  }
+  .chat-event-history-note {
+    margin-left: 0;
+  }
+  .chat-event > summary {
+    gap: 6px;
+  }
+  .chat-event-detail {
+    padding-right: 4px;
+    padding-left: 10px;
   }
   .chat-message > .avatar-wrap .member-avatar {
     width: 26px !important;

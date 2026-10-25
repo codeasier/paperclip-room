@@ -9,7 +9,9 @@ import { Markdown } from '../../components/Markdown';
 import { MemberAvatar } from '../../components/MemberAvatar';
 import { clockLabel, dayLabel } from '../../lib/format';
 import { chatRun, replyLabel, replyState } from '../../lib/chatReply';
+import { chatTimeline } from '../../lib/chatActivity';
 import { ChatActivity } from './ChatActivity';
+import { useChatActivity } from './useChatActivity';
 
 interface Props {
   company: string;
@@ -34,7 +36,19 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
   const enabled = query.data?.state === 'new' || query.data?.state === 'available';
   const messages = query.data?.messages || [];
   const run = chatRun(agent, query.data?.chat?.id);
-  const reply = replyState({ messages, run, now });
+  const { sources, hint } = useChatActivity({
+    company,
+    agentId: agent.id,
+    runs: query.data?.activityRuns,
+    liveRun: run,
+    active,
+  });
+  const timeline = chatTimeline(messages, sources, agent.name);
+  const reply = replyState({
+    messages: timeline.flatMap((entry) => (entry.kind === 'message' ? [entry.message] : [])),
+    run,
+    now,
+  });
   const pending = reply !== null;
   useEffect(() => {
     if (!pending) return;
@@ -75,7 +89,17 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
   useLayoutEffect(() => {
     if (stickToBottom.current && stream.current)
       stream.current.scrollTop = stream.current.scrollHeight;
-  }, [messages, pending]);
+  }, [timeline, pending]);
+  useEffect(() => {
+    const inner = stream.current?.querySelector('.chat-inner');
+    if (!inner) return;
+    const observer = new ResizeObserver(() => {
+      if (stickToBottom.current && stream.current)
+        stream.current.scrollTop = stream.current.scrollHeight;
+    });
+    observer.observe(inner);
+    return () => observer.disconnect();
+  }, []);
   return (
     <section className="chat-panel">
       <div className="chat-stream-wrap">
@@ -126,42 +150,50 @@ export function ChatPanel({ company, agent, draft, onDraft, active = true, model
                 </Typography.Paragraph>
               </div>
             )}
-            {messages.map((item, index) => (
-              <Fragment key={item.id}>
-                {item.ts && item.ts.slice(0, 10) !== messages[index - 1]?.ts?.slice(0, 10) && (
+            {timeline.map((entry, index) => (
+              <Fragment key={entry.id}>
+                {entry.ts && entry.ts.slice(0, 10) !== timeline[index - 1]?.ts?.slice(0, 10) && (
                   <div className="day-separator">
-                    <span>{dayLabel(item.ts)}</span>
+                    <span>{dayLabel(entry.ts)}</span>
                   </div>
                 )}
-                <article className={`chat-message ${item.author}`}>
-                  {item.author !== 'user' && <MemberAvatar name={item.authorName} size={30} />}
-                  <div className="message-body">
-                    <div className="message-meta">
-                      <strong>{item.authorName}</strong>
-                      <time>{clockLabel(item.ts)}</time>
+                {entry.kind === 'message' ? (
+                  <article
+                    className={`chat-message ${entry.message.author}`}
+                    data-event-id={entry.id}
+                  >
+                    {entry.message.author !== 'user' && (
+                      <MemberAvatar name={entry.message.authorName} size={30} />
+                    )}
+                    <div className="message-body">
+                      <div className="message-meta">
+                        <strong>{entry.message.authorName}</strong>
+                        <time>{clockLabel(entry.message.ts)}</time>
+                      </div>
+                      <div className="message-bubble">
+                        <Markdown
+                          text={entry.message.text}
+                          variant={entry.message.author === 'user' ? 'user' : 'agent'}
+                        />
+                        {entry.message.truncated && (
+                          <Typography.Text type="warning">内容已截断</Typography.Text>
+                        )}
+                      </div>
                     </div>
-                    <div className="message-bubble">
-                      {item.author === 'user' ? (
-                        <Markdown text={item.text} variant="user" />
-                      ) : (
-                        <Markdown text={item.text} />
-                      )}
-                      {item.truncated && (
-                        <Typography.Text type="warning">内容已截断</Typography.Text>
-                      )}
-                    </div>
-                  </div>
-                </article>
+                  </article>
+                ) : entry.kind === 'notice' ? (
+                  <p className="chat-event-history-note">{entry.text}</p>
+                ) : (
+                  <ChatActivity item={entry} />
+                )}
               </Fragment>
             ))}
             {reply && (
               <div className={`chat-reply ${reply.phase}`} role="status" aria-live="polite">
                 <span className="chat-reply-dot" aria-hidden="true" />
                 <span>{replyLabel(reply, agent.name)}</span>
+                {hint && <span className="chat-reply-hint">{hint}</span>}
               </div>
-            )}
-            {run?.status === 'running' && (
-              <ChatActivity company={company} agentId={agent.id} runId={run.id} />
             )}
           </div>
         </div>

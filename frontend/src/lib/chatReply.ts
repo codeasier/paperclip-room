@@ -38,8 +38,7 @@ export function replyState(input: {
   now: number;
 }): ReplyState | null {
   const last = [...input.messages].reverse().find((message) => message.author !== 'system');
-  if (!last || last.author !== 'user') return null;
-  const waited = ageMs(input.now, last.ts);
+  const waited = last ? ageMs(input.now, last.ts) : 0;
   const run = input.run;
   if (run?.status === 'running') {
     return {
@@ -48,6 +47,7 @@ export function replyState(input: {
       sinceOutput: run.lastOutputAt ? ageMs(input.now, run.lastOutputAt) : undefined,
     };
   }
+  if (!last || last.author !== 'user') return null;
   if (run?.status === 'queued') return { phase: 'queued', elapsed: waited };
   if (waited > REPLY_HORIZON_MS) return null;
   return { phase: waited >= REPLY_STALL_MS ? 'stalled' : 'waiting', elapsed: waited };

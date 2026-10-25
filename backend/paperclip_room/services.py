@@ -492,7 +492,7 @@ def room_timeline(agent_id, limit_mine=6, limit_others=12, company=None):
 
 
 def public_text(value, limit=16000):
-    """Only display content/tool fields; never select system prompts or reasoning columns."""
+    """Redact and bound explicitly selected display fields; callers own field selection."""
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     try:
         secret = api_key()
@@ -817,7 +817,9 @@ def execution_run(run, before=0, company=None):
     return {"id": run["id"], "agentId": run["agentId"], "status": run.get("status"), "ts": run.get("startedAt") or run.get("createdAt"), "finishedAt": run.get("finishedAt"), "issue": issue.get("identifier") or context.get("taskKey"), "issueTitle": issue.get("title") or "运行会话", "error": public_text(run.get("error") or "")["text"], "summary": public_text(summary), **session_transcript(run, before, company=company)}
 
 
-CHAT_ACTIVITY_STEPS = 10
+CHAT_ACTIVITY_STEPS = 400
+CHAT_ACTIVITY_ROWS = 400
+CHAT_ACTIVITY_RUNS = 6
 CHAT_ACTIVITY_TTL = 2.0
 
 
@@ -864,7 +866,7 @@ def _session_of_run(run, db):
         return None
     try:
         rows = db.execute(
-            "SELECT id FROM sessions WHERE started_at>=? AND started_at<=? ORDER BY started_at",
+            "SELECT id FROM sessions WHERE started_at>=? AND started_at<=? ORDER BY started_at LIMIT 2",
             (start - 5, start + 120),
         ).fetchall()
     except sqlite3.Error:
@@ -887,8 +889,9 @@ def _session_tail(run, limit):
             if not sid:
                 return None
             rows = db.execute(
-                "SELECT id,role,content,tool_calls,tool_name,reasoning,reasoning_content,timestamp"
-                " FROM messages WHERE session_id=? AND role IN ('assistant','tool')"
+                # Reasoning columns differ between Hermes versions; only access known
+                # display fields below, and keep this compatibility lookup bounded.
+                "SELECT * FROM messages WHERE session_id=? AND role IN ('assistant','tool')"
                 " AND timestamp>=? AND timestamp<=? ORDER BY id DESC LIMIT ?",
                 (sid, start, end, limit),
             ).fetchall()
@@ -898,28 +901,34 @@ def _session_tail(run, limit):
 
 
 def chat_activity(run):
-    """对话回合进行中的实时步骤：思考、工具调用与输出。
+    """对话回合的有界步骤：按会话顺序保留思考、回复、工具调用与结果。
 
-    只读本次运行窗口内的会话记录，不做跨运行推断；读不到就明确说读不到。
+    只读本次运行窗口内的会话记录；较早步骤被边界省略时明确标记。
     """
+    metadata = {key: run.get(key) for key in ("status", "startedAt", "createdAt", "finishedAt")}
+    empty = {**metadata, "steps": [], "hasEarlierSteps": False}
+    if run.get("status") == "queued":
+        return {**empty, "state": "pending", "note": "这一轮仍在排队，尚未开始执行。"}
+
     def _load():
-        rows = _session_tail(run, CHAT_ACTIVITY_STEPS * 2)
+        rows = _session_tail(run, CHAT_ACTIVITY_ROWS + 1)
         if rows is None:
-            return {"state": "unavailable", "steps": [], "note": "暂时定位不到这次运行的会话记录，只能看运行状态与耗时。"}
+            return {**empty, "state": "unavailable", "note": "暂时定位不到这次运行的会话记录，只能看运行状态与耗时。"}
         if not rows:
-            return {"state": "pending", "steps": [], "note": "这一轮还没有可读的助手或工具记录。"}
+            return {**empty, "state": "pending", "note": "这一轮还没有可读的助手或工具记录。"}
+        has_earlier = len(rows) > CHAT_ACTIVITY_ROWS
         steps = []
-        for row in rows:
+        for row in rows[-CHAT_ACTIVITY_ROWS:]:
             ts = datetime.fromtimestamp(row["timestamp"], timezone.utc).isoformat()
             if row["role"] == "assistant":
                 reasoning = (_activity_text(row, "reasoning") or _activity_text(row, "reasoning_content") or "").strip()
                 if reasoning:
                     steps.append({"id": f"r-{row['id']}", "kind": "thinking", "ts": ts,
-                                  **public_text(_redact_activity(reasoning), 400)})
+                                  **public_text(_redact_activity(reasoning))})
                 text = display_content(row["content"] or "")
                 if text.strip():
                     steps.append({"id": f"m-{row['id']}", "kind": "assistant", "ts": ts,
-                                  **public_text(text, 600)})
+                                  **public_text(_redact_activity(text))})
                 calls = decoded(row["tool_calls"], [])
                 for index, tool in enumerate(calls if isinstance(calls, list) else []):
                     if not isinstance(tool, dict):
@@ -929,7 +938,7 @@ def chat_activity(run):
                         "id": f"m-{row['id']}-t-{index}", "kind": "tool_call", "ts": ts,
                         "name": function.get("name") or "工具",
                         "toolCallId": tool.get("id") or tool.get("call_id"),
-                        **public_text(_redact_activity(_tool_command(function.get("arguments") or "")), 300),
+                        **public_text(_redact_activity(_tool_command(function.get("arguments") or ""))),
                     })
                 continue
             result = decoded(row["content"], {})
@@ -937,11 +946,16 @@ def chat_activity(run):
                 bool(result.get("error")) or result.get("exit_code") not in (None, 0)
             )
             steps.append({"id": f"t-{row['id']}", "kind": "tool_result", "ts": ts,
+                          "toolCallId": _activity_text(row, "tool_call_id"),
                           "name": row["tool_name"], "isError": is_error,
-                          **public_text(_redact_activity(_tool_output(row["content"] or "")), 240)})
-        return {"state": "available", "steps": steps[-CHAT_ACTIVITY_STEPS:],
-                "note": "来自 Hermes 会话的实时步骤；思考与输出过长时截断。"}
-    key = "chat-activity:" + str(run.get("id")) + ":" + str(run.get("sessionIdAfter"))
+                          **public_text(_redact_activity(_tool_output(row["content"] or "")))})
+        has_earlier = has_earlier or len(steps) > CHAT_ACTIVITY_STEPS
+        return {**metadata, "state": "available", "steps": steps[-CHAT_ACTIVITY_STEPS:],
+                "hasEarlierSteps": has_earlier,
+                "note": "来自 Hermes 会话的步骤；较早步骤省略或单条内容过长时明确标记。"}
+    identity = ("id", "companyId", "agentId", "sessionIdBefore", "sessionIdAfter",
+                "startedAt", "createdAt", "finishedAt", "status")
+    key = "chat-activity:" + json.dumps([run.get(field) for field in identity], ensure_ascii=False)
     return cached(key, CHAT_ACTIVITY_TTL, _load)
 
 
@@ -1069,6 +1083,37 @@ def chat_messages(issue_id, directory):
     return messages
 
 
+def _chat_activity_runs(company, agent_id, issue_id):
+    """最近成员运行窗口中精确属于本对话的六次运行；补查失败不影响消息。"""
+    if not issue_id:
+        return []
+    try:
+        window = fetch_agent_runs(agent_id, company)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    if not window["available"]:
+        return None
+    runs = []
+    seen = set()
+    for run in window["runs"][:MEMBER_RUN_LIMIT]:
+        if not isinstance(run, dict) or run.get("companyId") != company or run.get("agentId") != agent_id:
+            continue
+        context = run.get("contextSnapshot")
+        context = context if isinstance(context, dict) else {}
+        issue_ids = [value for value in (run.get("issueId"), context.get("issueId")) if value]
+        # Do not infer ownership from taskId, taskKey, or a conflicting issue identity.
+        if not issue_ids or any(value != issue_id for value in issue_ids):
+            continue
+        run_id = run.get("id")
+        if not isinstance(run_id, str) or not run_id or run_id in seen:
+            continue
+        seen.add(run_id)
+        runs.append({key: run.get(key) for key in
+                     ("id", "status", "startedAt", "createdAt", "finishedAt")})
+    runs.sort(key=lambda run: (_ts(run.get("startedAt") or run.get("createdAt")), run["id"]))
+    return runs[-CHAT_ACTIVITY_RUNS:]
+
+
 def chat_snapshot(company, agent_id):
     agent, agents = _chat_agent(company, agent_id)
     if not agent:
@@ -1090,6 +1135,7 @@ def chat_snapshot(company, agent_id):
     if messages is None:
         return {"agentId": agent_id, "agentName": agent.get("name"), "state": "unavailable",
                 "chat": {"id": data.get("id")}, "messages": [], "note": "对话消息暂不可用。"}
+    activity_runs = _chat_activity_runs(company, agent_id, data.get("id"))
     return {
         "agentId": agent_id,
         "agentName": agent.get("name"),
@@ -1103,6 +1149,7 @@ def chat_snapshot(company, agent_id):
             "lastActivityAt": data.get("lastActivityAt") or data.get("updatedAt"),
         },
         "messages": messages,
+        **({"activityRuns": activity_runs} if activity_runs is not None else {}),
         "note": "直接对话；消息会唤醒成员，不创建任务。",
     }
 
